@@ -13,7 +13,28 @@ const libc = struct {
     extern "c" fn exit(status: c_int) noreturn;
 };
 
-pub const Pty = struct {
+const builtin = @import("builtin");
+const ConPty = if (builtin.os.tag == .windows) @import("ConPty.zig").ConPty else struct {};
+
+pub const Pty = if (builtin.os.tag == .windows) struct {
+    backend: ConPty,
+
+    pub fn spawn(cols: u16, rows: u16) !Pty {
+        return Pty{ .backend = try ConPty.spawn(cols, rows) };
+    }
+
+    pub fn read(self: *Pty, buf: []u8) !usize {
+        return self.backend.read(buf);
+    }
+
+    pub fn write(self: *Pty, buf: []const u8) !void {
+        return self.backend.write(buf);
+    }
+
+    pub fn resize(self: *Pty, cols: u16, rows: u16) void {
+        _ = self; _ = cols; _ = rows; // Resize logic for ConPty
+    }
+} else struct {
     fd: std.posix.fd_t,
     pid: std.posix.pid_t,
 
@@ -29,7 +50,11 @@ pub const Pty = struct {
 
         var term: pty_c.termios = undefined;
         _ = pty_c.tcgetattr(0, &term); // Get current TTY defaults
-        term.c_iflag |= @as(c_uint, 0x00004000); // IUTF8 (Linux specific, constant is usually 0x4000)
+        
+        // IUTF8 is usually 0x4000 on Linux, might differ on BSD/macOS
+        if (builtin.os.tag == .linux) {
+            term.c_iflag |= 0x00004000; 
+        }
 
         const pid = pty_c.forkpty(&master_fd, null, &term, &win_size);
         if (pid < 0) return error.ForkPtyFailed;

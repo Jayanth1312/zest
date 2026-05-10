@@ -1,6 +1,11 @@
 # Zig build artifacts
 .zig-cache/
+release/
 zig-out/
+*.tar.gz
+*.zip
+svg_venv/
+deps/
 
 # Object files and libraries
 *.o

@@ -30,6 +30,7 @@ pub fn build(b: *std.Build) void {
     });
     const pty_mod = pty_translate.createModule();
 
+
     // Create the executable module
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -43,10 +44,28 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    exe_mod.linkSystemLibrary("glfw3", .{});
-    exe_mod.linkSystemLibrary("freetype2", .{});
-    exe_mod.linkSystemLibrary("GL", .{});
-    exe_mod.linkSystemLibrary("util", .{});
+    const target_os = target.result.os.tag;
+
+    if (target_os == .windows) {
+        exe_mod.linkSystemLibrary("glfw3", .{});
+        exe_mod.linkSystemLibrary("freetype", .{});
+        exe_mod.linkSystemLibrary("opengl32", .{});
+        exe_mod.linkSystemLibrary("gdi32", .{});
+        exe_mod.linkSystemLibrary("shell32", .{});
+    } else if (target_os == .macos) {
+        exe_mod.linkSystemLibrary("glfw", .{});
+        exe_mod.linkSystemLibrary("freetype", .{});
+        exe_mod.linkFramework("OpenGL", .{});
+        exe_mod.linkFramework("Cocoa", .{});
+        exe_mod.linkFramework("IOKit", .{});
+        exe_mod.linkFramework("CoreVideo", .{});
+        exe_mod.linkFramework("QuartzCore", .{});
+    } else {
+        exe_mod.linkSystemLibrary("glfw3", .{});
+        exe_mod.linkSystemLibrary("freetype2", .{});
+        exe_mod.linkSystemLibrary("GL", .{});
+        exe_mod.linkSystemLibrary("util", .{});
+    }
 
     const exe = b.addExecutable(.{
         .name = "zest",

@@ -33,7 +33,7 @@ Zest isn't just another terminal; it's built from the ground up for speed:
 
 1.  **Clone and Build**:
     ```bash
-    git clone https://github.com/Jayanth1312/flashterm.git zest
+    git clone https://github.com/Jayanth1312/zest.git zest
     cd zest
     zig build -Doptimize=ReleaseSafe
     ```

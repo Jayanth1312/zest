@@ -25,7 +25,3 @@ deps/
 
 # Logs
 *.log
-
-# Project specific
-assets/icon.png
-# (Keep icon.svg in git)

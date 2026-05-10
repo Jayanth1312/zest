@@ -1,8 +1,6 @@
-# ⚡ Zest Terminal
+# <img src="assets/icon.png" width="40" valign="middle"> Zest
 
 **Zest** is a lightning-fast, GPU-accelerated terminal emulator built with **Zig**. Engineered for extreme performance, low latency, and a premium "Black Metal" developer aesthetic.
-
-![Zest Logo](assets/icon.png)
 
 ## 🏎 Why is Zest so fast?
 

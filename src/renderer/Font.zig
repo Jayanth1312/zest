@@ -23,8 +23,8 @@ pub const Font = struct {
     glyphs: std.AutoHashMap(u21, GlyphInfo),
     allocator: std.mem.Allocator,
 
-    /// Initialize FreeType and load a monospace font at the given pixel size and scale.
-    pub fn init(allocator: std.mem.Allocator, font_path: [*:0]const u8, pixel_size: u32, scale: f32) !Font {
+    /// Initialize FreeType and load a monospace font at the given physical pixel size.
+    pub fn init(allocator: std.mem.Allocator, font_path: [*:0]const u8, pixel_size: u32) !Font {
         var lib: ft.FT_Library = null;
         if (ft.FT_Init_FreeType(&lib) != 0) {
             return error.FreeTypeInitFailed;
@@ -35,10 +35,11 @@ pub const Font = struct {
             return error.FontLoadFailed;
         }
 
-        _ = ft.FT_Set_Pixel_Sizes(face, 0, @intFromFloat(@as(f32, @floatFromInt(pixel_size)) * scale));
+        _ = ft.FT_Library_SetLcdFilter(lib, ft.FT_LCD_FILTER_DEFAULT);
+        _ = ft.FT_Set_Pixel_Sizes(face, 0, pixel_size);
 
         // Determine cell dimensions from the 'M' glyph
-        _ = ft.FT_Load_Char(face, 'M', ft.FT_LOAD_RENDER);
+        _ = ft.FT_Load_Char(face, 'M', ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_LCD);
         const metrics = face.*.size.*.metrics;
         const cell_height: u32 = @intCast(@divTrunc(metrics.height + 63, 64));
         const cell_width: u32 = @intCast(face.*.glyph.*.advance.x >> 6);

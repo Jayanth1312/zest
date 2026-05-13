@@ -15,7 +15,7 @@ const VERTICES_PER_CELL = 6; // 2 triangles
 const FLOATS_PER_CELL = FLOATS_PER_VERTEX * VERTICES_PER_CELL;
 
 const vertex_shader_src: [*:0]const u8 =
-    \\#version 330 core
+    \\#version 320 es
     \\layout (location = 0) in vec2 aPos;
     \\layout (location = 1) in vec2 aTexCoord;
     \\layout (location = 2) in vec3 aFgColor;
@@ -34,16 +34,19 @@ const vertex_shader_src: [*:0]const u8 =
 ;
 
 const fragment_shader_src: [*:0]const u8 =
-    \\#version 330 core
+    \\#version 320 es
+    \\precision highp float;
     \\in vec2 TexCoord;
     \\in vec3 FgColor;
     \\in vec3 BgColor;
     \\out vec4 FragColor;
     \\uniform sampler2D glyphAtlas;
     \\void main() {
-    \\    float alpha = texture(glyphAtlas, TexCoord).r;
-    \\    vec3 color = mix(BgColor, FgColor, alpha);
-    \\    FragColor = vec4(color, 1.0);
+    \\    vec3 alpha_rgb = texture(glyphAtlas, TexCoord).rgb;
+    \\    vec3 fg_linear = pow(FgColor, vec3(2.2));
+    \\    vec3 bg_linear = pow(BgColor, vec3(2.2));
+    \\    vec3 color_linear = mix(bg_linear, fg_linear, alpha_rgb);
+    \\    FragColor = vec4(pow(color_linear, vec3(1.0/2.2)), 1.0);
     \\}
     \\
 ;
@@ -59,10 +62,8 @@ pub const Renderer = struct {
     proj_loc: c.GLint,
 
     pub fn init(font: *Font.Font, fallback_font: ?*Font.Font) !Renderer {
-        // Build the glyph atlas
         var atlas = try Atlas.Atlas.init(font);
 
-        // Compile shaders
         const vs = compileShader(c.GL_VERTEX_SHADER, vertex_shader_src) orelse return error.VertexShaderFailed;
         const fs = compileShader(c.GL_FRAGMENT_SHADER, fragment_shader_src) orelse return error.FragmentShaderFailed;
 
@@ -138,21 +139,22 @@ pub const Renderer = struct {
         std.heap.page_allocator.free(self.vertex_buf);
     }
 
-    /// Render the entire grid to the screen.
+    /// Render the entire grid to the screen using physical framebuffer pixels.
     pub fn render(
         self: *Renderer,
         grid: *const Grid.Grid,
-        win_width: i32,
-        win_height: i32,
+        fb_width: i32,
+        fb_height: i32,
         cursor_col: u32,
         cursor_row: u32,
         current_time: f64,
+        last_input_time: f64,
         padding_x: f32,
         padding_y: f32,
         sel_start: ?Terminal.Pos,
         sel_end: ?Terminal.Pos,
     ) void {
-        c.glViewport(0, 0, win_width, win_height);
+        c.glViewport(0, 0, fb_width, fb_height);
 
         const bg_f = Cell.Color.default_bg.toFloats();
         c.glClearColor(bg_f[0], bg_f[1], bg_f[2], 1.0);
@@ -160,9 +162,9 @@ pub const Renderer = struct {
 
         c.glUseProgram(self.shader_program);
 
-        // Build orthographic projection: top-left origin
-        const w: f32 = @floatFromInt(win_width);
-        const h: f32 = @floatFromInt(win_height);
+        // Build orthographic projection using PHYSICAL framebuffer coordinates
+        const w: f32 = @floatFromInt(fb_width);
+        const h: f32 = @floatFromInt(fb_height);
         const proj = ortho(0.0, w, h, 0.0, -1.0, 1.0);
         c.glUniformMatrix4fv(self.proj_loc, 1, c.GL_FALSE, &proj);
 
@@ -170,7 +172,7 @@ pub const Renderer = struct {
         c.glActiveTexture(c.GL_TEXTURE0);
         c.glBindTexture(c.GL_TEXTURE_2D, self.atlas.texture_id);
 
-        // Build vertex data for all cells
+        // Build vertex data for all cells using PHYSICAL pixel coordinates
         const cw: f32 = @floatFromInt(self.font.cell_width);
         const ch: f32 = @floatFromInt(self.font.cell_height);
         const atlas_w: f32 = @floatFromInt(self.atlas.width);
@@ -237,11 +239,13 @@ pub const Renderer = struct {
                     }
                 }
 
-                // Cursor blinking logic
+                // Cursor blink: visible for 2s after input, then blink at 1Hz
                 if (col == cursor_col and row == cursor_row) {
-                    if (@mod(current_time, 1.0) < 0.5) {
-                        bg_color = Cell.Color.base05; // Light Gray background for cursor
-                        fg_color = Cell.Color.base00; // Black text for cursor
+                    const time_since_input = current_time - last_input_time;
+                    const cursor_on = if (time_since_input < 2.0) true else @mod(current_time, 1.0) < 0.6;
+                    if (cursor_on) {
+                        bg_color = Cell.Color.base05;
+                        fg_color = Cell.Color.base00;
                     }
                 }
 
@@ -255,7 +259,7 @@ pub const Renderer = struct {
                 const fg = fg_color.toFloats();
                 const bg = bg_color.toFloats();
 
-                // Cell position in pixels (with padding)
+                // Cell position in PHYSICAL pixels — no snapping needed
                 const is_wide = Terminal.Terminal.isWide(cell.char);
                 const x0: f32 = @as(f32, @floatFromInt(col)) * cw + padding_x;
                 const y0: f32 = @as(f32, @floatFromInt(row)) * ch + padding_y;

@@ -2,10 +2,10 @@
 .zig-cache/
 release/
 zig-out/
-*.tar.gz
 *.zip
 svg_venv/
 deps/
+libs/
 
 # Object files and libraries
 *.o
@@ -25,3 +25,9 @@ deps/
 
 # Logs
 *.log
+
+# nFPM generated packages
+*.deb
+*.rpm
+*.pkg.tar.zst
+*.tar.gz

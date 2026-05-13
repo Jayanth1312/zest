@@ -1,5 +1,4 @@
-// zest C interop header — includes all C dependencies
+// zest C interop header — includes all C dependencies via epoxy
 #define GL_GLEXT_PROTOTYPES 1
-#include <GL/gl.h>
-#include <GL/glext.h>
-#include <GLFW/glfw3.h>
+#include <epoxy/gl.h>
+#include <epoxy/glx.h>

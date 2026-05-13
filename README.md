@@ -1,4 +1,4 @@
-# <img src="assets/icon.png" width="40" valign="middle"> Zest
+# <img src="assets/icon.png" width="30" valign="middle"> Zest
 
 **Zest** is a lightning-fast, GPU-accelerated terminal emulator built with **Zig**. Engineered for extreme performance, low latency, and a premium "Black Metal" developer aesthetic.
 
@@ -15,17 +15,34 @@ Zest isn't just another terminal; it's built from the ground up for speed:
 ## ✨ Features
 
 - **High-Fidelity Text**: Crisp font rasterization via FreeType.
-- **Hardware Accelerated**: Full OpenGL rendering pipeline.
+- **Hardware Accelerated**: Full OpenGL ES rendering pipeline via libepoxy.
 - **Ultra-Low Latency**: Optimized for developers who demand instant feedback.
 - **Sleek Aesthetic**: Minimalist design with a focus on typography.
-- **Lightweight**: Tiny binary footprint (~1MB) and low memory usage.
+- **Lightweight**: Tiny binary footprint and low memory usage.
+- **Native Wayland/X11 Support**: GTK4 backend with automatic fractional scaling (100%, 125%, 150%, 200%) — no blurry rendering.
 
-## 🚀 Getting Started (v0.1.0 - Linux)
+## 🔄 What's New in v0.1.1
+
+### GTK4 Migration
+- Replaced GLFW with **GTK4** backend for native Wayland/X11 support
+- **Sharp rendering at all DPI levels** — fractional scaling works perfectly on Wayland compositors
+- GLArea-based OpenGL context with libepoxy for cross-platform GL function dispatch
+- Raw `extern` declarations for GTK4 C interop (Zig 0.17.0-dev doesn't support `@cImport`)
+- GLES 3.2 shaders (`#version 320 es`) for compatibility with GTK4's EGL context on Wayland
+
+### Key Fixes
+- Fixed `std.c.timespec` field access for Zig 0.17.0-dev (`sec`/`nsec` instead of `tv_sec`/`tv_nsec`)
+- Fixed `@ptrCast` const qualifier discard with `@constCast` for GTK signal callbacks
+- Fixed `g_signal_connect` macro → `g_signal_connect_data` function call
+- Fixed `gtk_window_get_width/height` → `gtk_widget_get_width/height` (GTK4 API)
+- Moved GL-dependent initialization (font, renderer, terminal, PTY) into `gl_realize_cb` (context must exist before shader compilation)
+
+## 🚀 Getting Started (v0.1.1 - Linux)
 
 ### Prerequisites
 
-- **Zig**: 0.13.0 or later.
-- **Dependencies**: GLFW3, FreeType2, and OpenGL headers.
+- **Zig**: 0.17.0-dev.
+- **Dependencies**: GTK4, FreeType2, Epoxy, Pango, and Cairo.
 
 ### Installation
 
@@ -41,17 +58,5 @@ Zest isn't just another terminal; it's built from the ground up for speed:
     ./zig-out/bin/zest
     ```
 
-## 📦 Releases
-
-Current release: **v0.1.0 (Linux Only)**
-
-- [zest-0.1.0-linux.tar.gz](zest-0.1.0-linux.tar.gz): Binary, icons, and assets.
-- [Source Code](zest-v0.1.0-source.zip): Full Zig source for v0.1.0.
-
-## 📜 License
-
-MIT License.
-
 ---
 Built with ⚡ by [Jayanth](https://github.com/Jayanth1312)
-

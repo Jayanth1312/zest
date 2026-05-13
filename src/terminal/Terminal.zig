@@ -34,6 +34,7 @@ pub const Terminal = struct {
     state: ParserState,
     params: [16]u16,
     param_count: u8,
+    csi_private: bool,
     utf8_buf: [4]u8,
     utf8_len: u8,
     utf8_expected: u8,
@@ -43,6 +44,7 @@ pub const Terminal = struct {
     selection_end: ?Pos = null,
     selection_active: bool = false,
     bracketed_paste_mode: bool = false,
+    cursor_key_mode: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, cols: u32, rows: u32) !Terminal {
         return Terminal{
@@ -61,6 +63,7 @@ pub const Terminal = struct {
             .state = .ground,
             .params = std.mem.zeroes([16]u16),
             .param_count = 0,
+            .csi_private = false,
             .utf8_buf = undefined,
             .utf8_len = 0,
             .utf8_expected = 0,
@@ -163,6 +166,7 @@ pub const Terminal = struct {
             '[' => {
                 self.state = .csi_entry;
                 self.param_count = 0;
+                self.csi_private = false;
                 @memset(&self.params, 0);
             },
             ']', 'P', '_', '^', 'X' => { // OSC, DCS, APC, PM, SOS
@@ -206,8 +210,9 @@ pub const Terminal = struct {
 
     fn processCsiEntry(self: *Terminal, byte: u8) void {
         if (byte >= 0x20 and byte <= 0x3F) {
-            // parameter or intermediate byte
-            if (byte >= '0' and byte <= '9') {
+            if (byte == '?') {
+                self.csi_private = true;
+            } else if (byte >= '0' and byte <= '9') {
                 self.params[0] = self.params[0] * 10 + @as(u16, byte - '0');
                 self.param_count = @max(self.param_count, 1);
             }
@@ -244,6 +249,27 @@ pub const Terminal = struct {
         self.state = .ground;
         const p0 = if (self.param_count > 0) self.params[0] else 0;
         const p1 = if (self.param_count > 1) self.params[1] else 0;
+
+        if (self.csi_private) {
+            switch (cmd) {
+                'h' => { // DECSET
+                    switch (p0) {
+                        1 => self.cursor_key_mode = true,
+                        2004 => self.bracketed_paste_mode = true,
+                        else => {},
+                    }
+                },
+                'l' => { // DECRST
+                    switch (p0) {
+                        1 => self.cursor_key_mode = false,
+                        2004 => self.bracketed_paste_mode = false,
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+            return;
+        }
 
         switch (cmd) {
             'A' => { // CUU — Cursor Up
@@ -313,16 +339,6 @@ pub const Terminal = struct {
                 self.scroll_bottom = @min(@as(u32, bot) -| 1, self.rows - 1);
                 self.cursor_col = 0;
                 self.cursor_row = self.scroll_top;
-            },
-            'h' => { // DECSET
-                if (self.param_count > 0 and self.params[0] == 2004) {
-                    self.bracketed_paste_mode = true;
-                }
-            },
-            'l' => { // DECRST
-                if (self.param_count > 0 and self.params[0] == 2004) {
-                    self.bracketed_paste_mode = false;
-                }
             },
             '@' => { // ICH — Insert Characters
                 const n = if (p0 == 0) 1 else @as(u32, p0);

@@ -29,11 +29,11 @@ pub const Atlas = struct {
         c.glTexImage2D(
             c.GL_TEXTURE_2D,
             0,
-            c.GL_RED,
+            c.GL_RGB,
             @intCast(width),
             @intCast(height),
             0,
-            c.GL_RED,
+            c.GL_RGB,
             c.GL_UNSIGNED_BYTE,
             null,
         );
@@ -65,10 +65,10 @@ pub const Atlas = struct {
         const slot_height = font.cell_height;
 
         var face = font.ft_face;
-        if (ft_c.FT_Load_Char(face, char, ft_c.FT_LOAD_RENDER) != 0) {
+        if (ft_c.FT_Load_Char(face, char, ft_c.FT_LOAD_RENDER | ft_c.FT_LOAD_TARGET_LCD) != 0) {
             if (fallback_font) |fallback| {
                 face = fallback.ft_face;
-                if (ft_c.FT_Load_Char(face, char, ft_c.FT_LOAD_RENDER) != 0) {
+                if (ft_c.FT_Load_Char(face, char, ft_c.FT_LOAD_RENDER | ft_c.FT_LOAD_TARGET_LCD) != 0) {
                     return error.GlyphLoadFailed;
                 }
             } else {
@@ -90,8 +90,8 @@ pub const Atlas = struct {
             return error.AtlasFull;
         }
 
-        // Create a temporary buffer for the full cell slot
-        const buf_size = slot_width * slot_height;
+        // Create a temporary buffer for the full cell slot (3 bytes per pixel for RGB)
+        const buf_size = slot_width * slot_height * 3;
         const cell_buf = try std.heap.page_allocator.alloc(u8, buf_size);
         defer std.heap.page_allocator.free(cell_buf);
         @memset(cell_buf, 0);
@@ -107,11 +107,15 @@ pub const Atlas = struct {
                 if (target_y < 0 or target_y >= slot_height) continue;
 
                 var x: u32 = 0;
-                while (x < bmp.width) : (x += 1) {
+                while (x < bmp.width / 3) : (x += 1) { // 3 channels per logical pixel
                     const target_x = @as(i32, @intCast(x)) + bx;
                     if (target_x < 0 or target_x >= slot_width) continue;
                     
-                    cell_buf[@intCast(target_y * @as(i32, @intCast(slot_width)) + target_x)] = bmp.buffer[y * @as(u32, @intCast(bmp.pitch)) + x];
+                    const src_idx = y * @as(u32, @intCast(bmp.pitch)) + x * 3;
+                    const dst_idx = @as(u32, @intCast(target_y * @as(i32, @intCast(slot_width)) + target_x)) * 3;
+                    cell_buf[dst_idx + 0] = bmp.buffer[src_idx + 0];
+                    cell_buf[dst_idx + 1] = bmp.buffer[src_idx + 1];
+                    cell_buf[dst_idx + 2] = bmp.buffer[src_idx + 2];
                 }
             }
         }
@@ -128,7 +132,7 @@ pub const Atlas = struct {
             @intCast(self.cursor_y),
             @intCast(slot_width),
             @intCast(slot_height),
-            c.GL_RED,
+            c.GL_RGB,
             c.GL_UNSIGNED_BYTE,
             cell_buf.ptr,
         );
@@ -163,7 +167,7 @@ pub const Atlas = struct {
             return error.AtlasFull;
         }
 
-        const buf_size = width * height;
+        const buf_size = width * height * 3;
         var buf = try std.heap.page_allocator.alloc(u8, buf_size);
         defer std.heap.page_allocator.free(buf);
         @memset(buf, 0);
@@ -175,13 +179,13 @@ pub const Atlas = struct {
             0x2580 => { // Upper half block
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[y * width .. (y + 1) * width], 255);
+                    @memset(buf[y * width * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2584 => { // Lower half block
                 var y: u32 = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. (y + 1) * width], 255);
+                    @memset(buf[y * width * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2588 => { // Full block
@@ -190,55 +194,55 @@ pub const Atlas = struct {
             0x258C => { // Left half block
                 var y: u32 = 0;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. y * width + mid_w], 255);
+                    @memset(buf[y * width * 3 .. (y * width + mid_w) * 3], 255);
                 }
             },
             0x2590 => { // Right half block
                 var y: u32 = 0;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width + mid_w .. (y + 1) * width], 255);
+                    @memset(buf[(y * width + mid_w) * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2596 => { // Quadrant lower left
                 var y = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. y * width + mid_w], 255);
+                    @memset(buf[y * width * 3 .. (y * width + mid_w) * 3], 255);
                 }
             },
             0x2597 => { // Quadrant lower right
                 var y = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width + mid_w .. (y + 1) * width], 255);
+                    @memset(buf[(y * width + mid_w) * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2598 => { // Quadrant upper left
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[y * width .. y * width + mid_w], 255);
+                    @memset(buf[y * width * 3 .. (y * width + mid_w) * 3], 255);
                 }
             },
             0x259D => { // Quadrant upper right
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[y * width + mid_w .. (y + 1) * width], 255);
+                    @memset(buf[(y * width + mid_w) * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2582 => { // Lower quarter block
                 var y: u32 = height - (height / 4);
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. (y + 1) * width], 255);
+                    @memset(buf[y * width * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2586 => { // Lower three quarters block
                 var y: u32 = height / 4;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. (y + 1) * width], 255);
+                    @memset(buf[y * width * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             0x2587 => { // Lower seven eighths block
                 var y: u32 = height / 8;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width .. (y + 1) * width], 255);
+                    @memset(buf[y * width * 3 .. (y + 1) * width * 3], 255);
                 }
             },
             else => { // Fallback to full block for other range characters
@@ -257,7 +261,7 @@ pub const Atlas = struct {
             @intCast(self.cursor_y),
             @intCast(width),
             @intCast(height),
-            c.GL_RED,
+            c.GL_RGB,
             c.GL_UNSIGNED_BYTE,
             buf.ptr,
         );

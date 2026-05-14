@@ -30,6 +30,15 @@ pub fn build(b: *std.Build) void {
     });
     const pty_mod = pty_translate.createModule();
 
+    const fc_translate = b.addTranslateC(.{
+        .root_source_file = b.path("src/c_fc.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    fc_translate.addIncludePath(.{ .cwd_relative = "/usr/include" });
+    const fc_mod = fc_translate.createModule();
+
     // GTK4: use @cImport directly (translate-c can't handle GTK4's complex macros)
     // We pass include paths via the module so @cImport can find headers
     const gtk_include_paths = [_][]const u8{
@@ -62,6 +71,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "c_gl", .module = gl_mod },
             .{ .name = "c_ft", .module = ft_mod },
             .{ .name = "c_pty", .module = pty_mod },
+            .{ .name = "c_fc", .module = fc_mod },
         },
     });
 
@@ -103,6 +113,7 @@ pub fn build(b: *std.Build) void {
         exe_mod.linkSystemLibrary("epoxy", .{});
         exe_mod.linkSystemLibrary("GL", .{});
         exe_mod.linkSystemLibrary("util", .{});
+        exe_mod.linkSystemLibrary("fontconfig", .{});
     }
 
     const exe = b.addExecutable(.{

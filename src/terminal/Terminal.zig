@@ -46,6 +46,9 @@ pub const Terminal = struct {
     bracketed_paste_mode: bool = false,
     cursor_key_mode: bool = false,
 
+    alt_screen_grid: ?Grid.Grid = null,
+    using_alt_screen: bool = false,
+
     pub fn init(allocator: std.mem.Allocator, cols: u32, rows: u32) !Terminal {
         return Terminal{
             .grid = try Grid.Grid.init(allocator, cols, rows),
@@ -73,6 +76,9 @@ pub const Terminal = struct {
 
     pub fn deinit(self: *Terminal) void {
         self.grid.deinit();
+        if (self.alt_screen_grid) |*alt| {
+            alt.deinit();
+        }
     }
 
     /// Feed raw bytes from PTY into the parser.
@@ -256,6 +262,7 @@ pub const Terminal = struct {
                     switch (p0) {
                         1 => self.cursor_key_mode = true,
                         2004 => self.bracketed_paste_mode = true,
+                        1049 => self.enterAltScreen(),
                         else => {},
                     }
                 },
@@ -263,6 +270,7 @@ pub const Terminal = struct {
                     switch (p0) {
                         1 => self.cursor_key_mode = false,
                         2004 => self.bracketed_paste_mode = false,
+                        1049 => self.exitAltScreen(),
                         else => {},
                     }
                 },
@@ -420,10 +428,68 @@ pub const Terminal = struct {
     }
 
     pub fn isWide(char: u21) bool {
-        // Simple wide character check (covers most Emojis and CJK)
         if (char >= 0x1100 and (char <= 0x115F or char == 0x2329 or char == 0x232A or (char >= 0x2E80 and char <= 0xA4CF and char != 0x303F) or (char >= 0xAC00 and char <= 0xD7A3) or (char >= 0xF900 and char <= 0xFAFF) or (char >= 0xFE10 and char <= 0xFE19) or (char >= 0xFE30 and char <= 0xFE6F) or (char >= 0xFF00 and char <= 0xFF60) or (char >= 0xFFE0 and char <= 0xFFE6) or (char >= 0x20000 and char <= 0x2FFFD) or (char >= 0x30000 and char <= 0x3FFFD))) return true;
-        // Emoji range
         if (char >= 0x1F300 and char <= 0x1F9FF) return true;
+        return false;
+    }
+
+    pub fn isEmoji(char: u21) bool {
+        if (char >= 0x1F600 and char <= 0x1F64F) return true;
+        if (char >= 0x1F300 and char <= 0x1F5FF) return true;
+        if (char >= 0x1F680 and char <= 0x1F6FF) return true;
+        if (char >= 0x1F900 and char <= 0x1F9FF) return true;
+        if (char >= 0x1FA00 and char <= 0x1FA6F) return true;
+        if (char >= 0x1FA70 and char <= 0x1FAFF) return true;
+        if (char >= 0x2600 and char <= 0x26FF) return true;
+        if (char >= 0x2700 and char <= 0x27BF) return true;
+        if (char >= 0xFE00 and char <= 0xFE0F) return true;
+        if (char >= 0x1F1E0 and char <= 0x1F1FF) return true;
+        if (char >= 0x1F004 and char <= 0x1F004) return true;
+        if (char >= 0x1F0CF and char <= 0x1F0CF) return true;
+        if (char >= 0x1F170 and char <= 0x1F171) return true;
+        if (char >= 0x1F17E and char <= 0x1F17F) return true;
+        if (char >= 0x1F18E and char <= 0x1F18E) return true;
+        if (char >= 0x1F191 and char <= 0x1F19A) return true;
+        if (char >= 0x1F201 and char <= 0x1F202) return true;
+        if (char >= 0x1F21A and char <= 0x1F21A) return true;
+        if (char >= 0x1F22F and char <= 0x1F22F) return true;
+        if (char >= 0x1F232 and char <= 0x1F23A) return true;
+        if (char >= 0x1F250 and char <= 0x1F251) return true;
+        if (char >= 0x1F300 and char <= 0x1F320) return true;
+        if (char >= 0x1F32D and char <= 0x1F335) return true;
+        if (char >= 0x1F337 and char <= 0x1F37C) return true;
+        if (char >= 0x1F37E and char <= 0x1F393) return true;
+        if (char >= 0x1F3A0 and char <= 0x1F3CA) return true;
+        if (char >= 0x1F3CF and char <= 0x1F3D3) return true;
+        if (char >= 0x1F3E0 and char <= 0x1F3F0) return true;
+        if (char >= 0x1F3F4 and char <= 0x1F3F4) return true;
+        if (char >= 0x1F3F8 and char <= 0x1F43E) return true;
+        if (char >= 0x1F440 and char <= 0x1F440) return true;
+        if (char >= 0x1F442 and char <= 0x1F4FC) return true;
+        if (char >= 0x1F4FF and char <= 0x1F53D) return true;
+        if (char >= 0x1F54B and char <= 0x1F54E) return true;
+        if (char >= 0x1F550 and char <= 0x1F567) return true;
+        if (char >= 0x1F57A and char <= 0x1F57A) return true;
+        if (char >= 0x1F595 and char <= 0x1F596) return true;
+        if (char >= 0x1F5A4 and char <= 0x1F5A4) return true;
+        if (char >= 0x1F5FB and char <= 0x1F64F) return true;
+        if (char >= 0x1F680 and char <= 0x1F6C5) return true;
+        if (char >= 0x1F6CC and char <= 0x1F6CC) return true;
+        if (char >= 0x1F6D0 and char <= 0x1F6D2) return true;
+        if (char >= 0x1F6D5 and char <= 0x1F6D7) return true;
+        if (char >= 0x1F6EB and char <= 0x1F6EC) return true;
+        if (char >= 0x1F6F4 and char <= 0x1F6FC) return true;
+        if (char >= 0x1F7E0 and char <= 0x1F7EB) return true;
+        if (char >= 0x1F90C and char <= 0x1F93A) return true;
+        if (char >= 0x1F93C and char <= 0x1F945) return true;
+        if (char >= 0x1F947 and char <= 0x1F9FF) return true;
+        if (char >= 0x1FA70 and char <= 0x1FA7C) return true;
+        if (char >= 0x1FA80 and char <= 0x1FA88) return true;
+        if (char >= 0x1FA90 and char <= 0x1FABD) return true;
+        if (char >= 0x1FABF and char <= 0x1FAC5) return true;
+        if (char >= 0x1FACE and char <= 0x1FADB) return true;
+        if (char >= 0x1FAE0 and char <= 0x1FAE8) return true;
+        if (char >= 0x1FAF0 and char <= 0x1FAF8) return true;
         return false;
     }
 
@@ -584,13 +650,73 @@ pub const Terminal = struct {
         self.cursor_row = @min(self.cursor_row, new_rows -| 1);
         self.scroll_top = 0;
         self.scroll_bottom = new_rows - 1;
+
+        if (self.alt_screen_grid) |*alt| {
+            var new_alt = Grid.Grid.init(self.allocator, new_cols, new_rows) catch return;
+            const ac = @min(self.cols, new_cols);
+            const ar = @min(self.rows, new_rows);
+            var r: u32 = 0;
+            while (r < ar) : (r += 1) {
+                var c: u32 = 0;
+                while (c < ac) : (c += 1) {
+                    new_alt.setCellAt(c, r, alt.cellAt(c, r));
+                }
+            }
+            alt.deinit();
+            self.alt_screen_grid = new_alt;
+        }
+    }
+
+    fn enterAltScreen(self: *Terminal) void {
+        if (self.using_alt_screen) return;
+        self.using_alt_screen = true;
+        if (self.alt_screen_grid == null) {
+            self.alt_screen_grid = Grid.Grid.init(self.allocator, self.cols, self.rows) catch return;
+        }
+        // Save current grid to alt_screen_grid
+        const copy_cols = @min(self.cols, self.alt_screen_grid.?.cols);
+        const copy_rows = @min(self.rows, self.alt_screen_grid.?.rows);
+        var row: u32 = 0;
+        while (row < copy_rows) : (row += 1) {
+            var col: u32 = 0;
+            while (col < copy_cols) : (col += 1) {
+                self.alt_screen_grid.?.setCellAt(col, row, self.grid.cellAt(col, row));
+            }
+        }
+        // Clear the current (now alt) screen
+        self.grid.clear(.{
+            .char = ' ',
+            .fg = self.current_fg,
+            .bg = self.current_bg,
+            .attrs = .{},
+        });
+        self.cursor_col = 0;
+        self.cursor_row = 0;
+    }
+
+    fn exitAltScreen(self: *Terminal) void {
+        if (!self.using_alt_screen) return;
+        self.using_alt_screen = false;
+        // Restore the saved screen
+        if (self.alt_screen_grid) |alt| {
+            const copy_cols = @min(self.cols, alt.cols);
+            const copy_rows = @min(self.rows, alt.rows);
+            var row: u32 = 0;
+            while (row < copy_rows) : (row += 1) {
+                var col: u32 = 0;
+                while (col < copy_cols) : (col += 1) {
+                    self.grid.setCellAt(col, row, alt.cellAt(col, row));
+                }
+            }
+        }
+        self.cursor_col = 0;
+        self.cursor_row = 0;
     }
 
     pub fn getSelectedText(self: *Terminal, allocator: std.mem.Allocator) !?[]const u8 {
         const start = self.selection_start orelse return null;
         const end = self.selection_end orelse return null;
 
-        // Normalize start and end
         var r0 = start.row;
         var c0 = start.col;
         var r1 = end.row;
@@ -612,9 +738,9 @@ pub const Terminal = struct {
             var c_idx = start_col;
             while (c_idx <= end_col) : (c_idx += 1) {
                 const cell = self.grid.cellAt(c_idx, r);
-                if (cell.char != 0) {
+                if (cell.char != 0 and cell.char <= 0x10FFFF) {
                     var buf: [4]u8 = undefined;
-                    const len = try std.unicode.utf8Encode(cell.char, &buf);
+                    const len = std.unicode.utf8Encode(cell.char, &buf) catch continue;
                     try list.appendSlice(allocator, buf[0..len]);
                 } else if (c_idx <= end_col) {
                     try list.append(allocator, ' ');
@@ -623,7 +749,9 @@ pub const Terminal = struct {
             if (r < r1) try list.append(allocator, '\n');
         }
 
-        return try list.toOwnedSlice(allocator);
+        try list.append(allocator, 0);
+        const slice = try list.toOwnedSlice(allocator);
+        return slice[0 .. slice.len - 1 :0];
     }
 };
 

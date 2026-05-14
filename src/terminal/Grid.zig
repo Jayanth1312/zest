@@ -105,4 +105,16 @@ pub const Grid = struct {
             @memset(self.cells[start .. start + self.cols], fill_cell);
         }
     }
+    
+    pub fn getLastUsedRow(self: *const Grid) u32 {
+        var r: u32 = self.rows - 1;
+        while (r > 0) : (r -= 1) {
+            var c: u32 = 0;
+            while (c < self.cols) : (c += 1) {
+                const char = self.cellAt(c, r).char;
+                if (char != 0 and char != ' ') return r;
+            }
+        }
+        return 0;
+    }
 };

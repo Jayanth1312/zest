@@ -37,9 +37,9 @@ pub const PaneManager = struct {
     }
 
     pub fn deinit(self: *PaneManager) void {
-        var panes = std.ArrayList(*Pane).init(self.allocator);
-        defer panes.deinit();
-        try self.tree.root.collectPanes(&panes);
+        var panes: std.ArrayListUnmanaged(*Pane) = .empty;
+        defer panes.deinit(self.allocator);
+        self.tree.root.collectPanes(&panes, self.allocator) catch return;
 
         for (panes.items) |p| {
             p.deinit();

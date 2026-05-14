@@ -17,7 +17,7 @@ pub const KeyBindings = struct {
             return switch (keyval) {
                 'h', 'H' => .splitHorizontal,
                 'j', 'J' => .splitVertical,
-                'w', 'W' => .closePane,
+                'x', 'X' => .closePane,
                 0xFF51 => .focusLeft,
                 0xFF52 => .focusUp,
                 0xFF53 => .focusRight,

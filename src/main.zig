@@ -15,6 +15,7 @@ const INITIAL_COLS: u32 = 120;
 const INITIAL_ROWS: u32 = 35;
 const PADDING_X: f32 = 32.0;
 const PADDING_Y: f32 = 16.0;
+const TAB_BAR_HEIGHT: c_int = 36;
 
 const GtkApplication = opaque {};
 const GtkWindow = opaque {};
@@ -25,6 +26,7 @@ const GtkEventControllerMotion = opaque {};
 const GtkGestureClick = opaque {};
 const GtkIMContext = opaque {};
 const GdkClipboard = opaque {};
+const GdkDisplay = opaque {};
 const cairo_t = opaque {};
 const GtkEventControllerScroll = opaque {};
 
@@ -66,8 +68,97 @@ extern fn gdk_clipboard_read_text_finish(clipboard: *GdkClipboard, result: ?*any
 extern fn g_idle_add(func: *const fn (?*anyopaque) callconv(.c) c_int, data: ?*anyopaque) c_uint;
 extern fn clock_gettime(clk_id: c_int, tp: *std.c.timespec) c_int;
 
+// Overlay and layout
+extern fn gtk_overlay_new() *GtkWidget;
+extern fn gtk_overlay_set_child(overlay: *GtkWidget, child: *GtkWidget) void;
+extern fn gtk_overlay_add_overlay(overlay: *GtkWidget, widget: *GtkWidget) void;
+extern fn gtk_box_new(orientation: c_int, spacing: c_int) *GtkWidget;
+extern fn gtk_box_append(box: *GtkWidget, child: *GtkWidget) void;
+extern fn gtk_box_remove(box: *GtkWidget, child: *GtkWidget) void;
+extern fn gtk_widget_set_vexpand(widget: *GtkWidget, expand: c_int) void;
+extern fn gtk_widget_set_hexpand(widget: *GtkWidget, expand: c_int) void;
+extern fn gtk_widget_set_size_request(widget: *GtkWidget, width: c_int, height: c_int) void;
+extern fn gtk_scrolled_window_new(hscroll: ?*anyopaque, vscroll: ?*anyopaque) *GtkWidget;
+extern fn gtk_scrolled_window_set_policy(scrolled: *GtkWidget, hpolicy: c_int, vpolicy: c_int) void;
+extern fn gtk_scrolled_window_set_child(scrolled: *GtkWidget, child: *GtkWidget) void;
+
+// Label
+extern fn gtk_label_new(str: [*:0]const u8) *GtkWidget;
+extern fn gtk_label_set_text(label: *GtkWidget, str: [*:0]const u8) void;
+extern fn gtk_widget_set_halign(widget: *GtkWidget, alignment: c_int) void;
+extern fn gtk_widget_set_valign(widget: *GtkWidget, alignment: c_int) void;
+extern fn gtk_widget_set_margin_bottom(widget: *GtkWidget, margin: c_int) void;
+extern fn gtk_widget_set_margin_end(widget: *GtkWidget, margin: c_int) void;
+extern fn gtk_widget_set_margin_top(widget: *GtkWidget, margin: c_int) void;
+extern fn gtk_widget_set_margin_start(widget: *GtkWidget, margin: c_int) void;
+
+// Button
+extern fn gtk_button_new_with_label(label: [*:0]const u8) *GtkWidget;
+extern fn gtk_button_set_label(button: *GtkWidget, label: [*:0]const u8) void;
+extern fn gtk_widget_add_css_class(widget: *GtkWidget, css_class: [*:0]const u8) void;
+extern fn gtk_widget_remove_css_class(widget: *GtkWidget, css_class: [*:0]const u8) void;
+
+// CSS provider
+extern fn gtk_css_provider_new() *anyopaque;
+extern fn gtk_css_provider_load_from_data(provider: *anyopaque, data: [*:0]const u8, length: isize) void;
+extern fn gdk_display_get_default() ?*GdkDisplay;
+extern fn gtk_style_context_add_provider_for_display(display: *GdkDisplay, provider: *anyopaque, priority: c_uint) void;
+
+// C library for readlink
+extern fn readlink(pathname: [*:0]const u8, buf: [*]u8, bufsiz: usize) isize;
+
+// Timeout
+extern fn g_timeout_add(interval: c_uint, func: *const fn (?*anyopaque) callconv(.c) c_int, data: ?*anyopaque) c_uint;
+
 const CLOCK_MONOTONIC: c_int = 1;
+const CLOCK_REALTIME: c_int = 0;
 const G_APPLICATION_FLAGS_NONE: c_int = 0;
+const GTK_ALIGN_END: c_int = 2;
+const GTK_ORIENTATION_VERTICAL: c_int = 1;
+const GTK_ORIENTATION_HORIZONTAL: c_int = 0;
+const GTK_POLICY_AUTOMATIC: c_int = 1;
+const GTK_POLICY_NEVER: c_int = 2;
+const GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: c_uint = 600;
+
+// Black Metal Immortal theme colors
+const THEME_BG = "#000000";
+const THEME_BG_LIGHT = "#121212";
+const THEME_BG_MID = "#1a1a1a";
+const THEME_BORDER = "#333333";
+const THEME_FG = "#c1c1c1";
+const THEME_FG_DIM = "#666666";
+const THEME_ACCENT = "#5f8787";
+
+const TAB_CSS = 
+    \\box.tab-bar { background-color: #0d0d0d; padding: 0; min-height: 28px; }
+    \\scrolledwindow.tab-scroll { background-color: #0d0d0d; }
+    \\scrolledwindow.tab-scroll undershoot.left { background-color: alpha(#333333, 0.5); min-width: 1px; }
+    \\scrolledwindow.tab-scroll undershoot.right { background-color: alpha(#333333, 0.5); min-width: 1px; }
+    \\box.right-section { background-image: linear-gradient(to right, rgba(13,13,13,0) 0%, rgba(13,13,13,0.6) 40%, #0a0a0a 100%); padding: 0 4px 0 8px; }
+    \\button.tab-button { background-color: #1a1a1a; color: #999999; border: none; border-radius: 0; padding: 4px 14px; font-size: 11px; min-height: 28px; transition: all 150ms ease; }
+    \\button.tab-button:hover { background-color: #252525; color: #c1c1c1; }
+    \\button.active-tab { background-color: #000000; color: #e0e0e0; border-bottom: 2px solid #5f8787; }
+    \\button.new-tab-button { background-color: transparent; color: #555555; border: none; border-radius: 0; padding: 2px 6px; font-size: 16px; min-height: 28px; }
+    \\button.new-tab-button:hover { background-color: rgba(255,255,255,0.05); color: #c1c1c1; }
+    \\label.clock-label { color: #888888; font-size: 11px; font-weight: 500; padding: 0 8px; }
+;
+
+const Tab = struct {
+    pane_manager: *PaneManager,
+    button: ?*GtkWidget = null,
+    title_buf: [256]u8 = undefined,
+    title_len: usize = 0,
+
+    fn setTitleFmt(self: *Tab, comptime fmt: []const u8, args: anytype) void {
+        const result = std.fmt.bufPrint(&self.title_buf, fmt, args) catch "Tab";
+        self.title_len = @min(result.len, self.title_buf.len - 1);
+        self.title_buf[self.title_len] = 0;
+    }
+
+    fn getTitle(self: *Tab) [:0]const u8 {
+        return self.title_buf[0..self.title_len :0];
+    }
+};
 
 var g_pane_manager: ?*PaneManager = null;
 var g_key_bindings: KeyBindings = KeyBindings{};
@@ -87,6 +178,22 @@ var g_fb_height: i32 = 0;
 var g_win_width: i32 = 0;
 var g_win_height: i32 = 0;
 
+// Tab and clock state
+var g_tabs: std.ArrayListUnmanaged(Tab) = .empty;
+var g_active_tab: usize = 0;
+var g_clock_label: ?*GtkWidget = null;
+var g_tab_bar: ?*GtkWidget = null;      // outer box: [scrolled_tabs] [right_section]
+var g_tab_container: ?*GtkWidget = null; // inner box holding just tab buttons
+var g_tab_scrolled: ?*GtkWidget = null;  // scrolled window for tab container
+var g_right_section: ?*GtkWidget = null; // right section with gradient: [+] [clock]
+var g_new_tab_button: ?*GtkWidget = null;
+var g_main_box: ?*GtkWidget = null;
+var g_overlay: ?*GtkWidget = null;
+var g_tab_counter: u32 = 0;
+
+// Tab index storage
+var g_tab_indices: std.ArrayListUnmanaged(*usize) = .empty;
+
 fn getTime() f64 {
     var ts: std.c.timespec = undefined;
     _ = clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -105,6 +212,45 @@ fn updateSizes() void {
 
 fn queueRender() void {
     if (g_gl_area) |area| gtk_gl_area_queue_render(area);
+}
+
+fn getTabCwd(tab: *Tab) ?[:0]const u8 {
+    var panes = tab.pane_manager.getVisiblePanes() catch return null;
+    defer panes.deinit(std.heap.page_allocator);
+    if (panes.items.len == 0) return null;
+
+    const pane = panes.items[0];
+    const pid = pane.pty.pid;
+
+    var pid_path_buf: [64]u8 = undefined;
+    const pid_path_len = std.fmt.bufPrint(&pid_path_buf, "/proc/{d}/cwd", .{pid}) catch return null;
+    pid_path_buf[pid_path_len.len] = 0;
+
+    var cwd_buf: [4096]u8 = undefined;
+    const len = readlink(@ptrCast(&pid_path_buf[0]), &cwd_buf, cwd_buf.len);
+    if (len <= 0) return null;
+
+    const cwd = cwd_buf[0..@as(usize, @intCast(len))];
+    if (cwd.len == 0) return null;
+
+    const home = "/home/";
+    if (std.mem.startsWith(u8, cwd, home)) {
+        const after_home = cwd[home.len - 1 ..];
+        tab.setTitleFmt("~{s}", .{after_home});
+    } else {
+        const last_sep = std.mem.lastIndexOfScalar(u8, cwd, '/') orelse 0;
+        const dir_name = if (last_sep == 0 and cwd.len > 0) cwd else cwd[last_sep + 1 ..];
+        tab.setTitleFmt("{s}", .{dir_name});
+    }
+    return tab.getTitle();
+}
+
+fn updateTabButtonLabel(tab: *Tab) void {
+    const cwd = getTabCwd(tab);
+    const label = cwd orelse tab.getTitle();
+    if (tab.button) |btn| {
+        gtk_button_set_label(@ptrCast(btn), label.ptr);
+    }
 }
 
 fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
@@ -160,14 +306,11 @@ fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
     };
     g_renderer = renderer_ptr;
 
-    const pm_ptr = std.heap.page_allocator.create(PaneManager) catch return;
-    pm_ptr.* = PaneManager.init(std.heap.page_allocator, font_ptr, INITIAL_COLS, INITIAL_ROWS) catch {
-        std.debug.print("zest: pane manager init failed\n", .{});
-        return;
-    };
-    g_pane_manager = pm_ptr;
-
     g_initialized = true;
+    
+    // Create the first tab
+    createTab();
+    
     _ = g_idle_add(ptyReadIdle, null);
 }
 
@@ -228,8 +371,8 @@ fn gl_resize_cb(_: ?*GtkGLArea, w: c_int, h: c_int, _: ?*anyopaque) callconv(.c)
     g_fb_width = w;
     g_fb_height = h;
     updateSizes();
-    if (g_pane_manager != null) {
-        g_pane_manager.?.handleResize(w, h) catch {};
+    for (g_tabs.items) |*tab| {
+        tab.pane_manager.handleResize(w, h) catch {};
     }
     queueRender();
 }
@@ -242,6 +385,34 @@ fn key_pressed_cb(_: ?*GtkEventControllerKey, keyval: c_uint, keycode: c_uint, s
     const ctrl = mods.ctrl;
     const shift = mods.shift;
     const alt = mods.alt;
+
+    // Tab management shortcuts
+    if (ctrl and !alt) {
+        const is_shift_tab = shift and (keyval == 0xff09 or keyval == 0xfe20);
+        const is_tab = !shift and keyval == 0xff09;
+        const is_page_down = keyval == 0xff56; // Next
+        const is_page_up = keyval == 0xff55; // Prior
+
+        if (is_tab or is_page_down) {
+            switchToTab((g_active_tab + 1) % g_tabs.items.len);
+            return 1;
+        }
+        if (is_shift_tab or is_page_up) {
+            switchToTab(if (g_active_tab == 0) g_tabs.items.len - 1 else g_active_tab - 1);
+            return 1;
+        }
+    }
+
+    if (ctrl and shift) {
+        if (keyval == 't' or keyval == 'T') {
+            createTab();
+            return 1;
+        }
+        if (keyval == 'w' or keyval == 'W') {
+            closeActiveTab();
+            return 1;
+        }
+    }
 
     const direct_cmd = KeyBindings.handleDirectShortcut(keyval, ctrl, shift, alt);
     if (direct_cmd != .none and g_pane_manager != null) {
@@ -414,40 +585,202 @@ fn scroll_cb(_: ?*GtkEventControllerScroll, _: f64, dy: f64, _: ?*anyopaque) cal
     
     const focused = g_pane_manager.?.getFocusedPane();
     if (focused) |pane| {
-        // If we are in a TUI app (like opencode), map scrolling to Up/Down arrows
         if (pane.terminal.using_alt_screen) {
             if (dy > 0.0) {
-                // Scrolled down
                 pane.write("\x1b[B") catch {}; 
             } else if (dy < 0.0) {
-                // Scrolled up
                 pane.write("\x1b[A") catch {}; 
             }
-            return 1; // Event handled
+            return 1;
         }
     }
     return 0;
 }
 
 fn ptyReadIdle(_: ?*anyopaque) callconv(.c) c_int {
-    if (g_pane_manager == null) return 1;
+    for (g_tabs.items) |*tab| {
+        var panes = tab.pane_manager.getVisiblePanes() catch continue;
+        defer panes.deinit(std.heap.page_allocator);
 
-    var panes = g_pane_manager.?.getVisiblePanes() catch return 1;
-    defer panes.deinit(std.heap.page_allocator);
-
-    var read_buf: [65536]u8 = undefined;
-    for (panes.items) |pane| {
-        const bytes_read = pane.read(&read_buf) catch 0;
-        if (bytes_read > 0) {
-            pane.feed(read_buf[0..bytes_read]);
+        var read_buf: [65536]u8 = undefined;
+        for (panes.items) |pane| {
+            const bytes_read = pane.read(&read_buf) catch 0;
+            if (bytes_read > 0) {
+                pane.feed(read_buf[0..bytes_read]);
+            }
         }
+        
+        const current_time = getTime();
+        tab.pane_manager.tick(current_time);
     }
-
-    const current_time = getTime();
-    g_pane_manager.?.tick(current_time);
 
     queueRender();
     return 1;
+}
+
+fn clock_tick(_: ?*anyopaque) callconv(.c) c_int {
+    if (g_clock_label) |label| {
+        var ts: std.c.timespec = undefined;
+        _ = clock_gettime(CLOCK_REALTIME, &ts);
+        const total_secs = @as(u64, @intCast(@mod(ts.sec, 86400)));
+        const hours = total_secs / 3600;
+        const minutes = (total_secs % 3600) / 60;
+        var buf: [16]u8 = undefined;
+        const len = std.fmt.bufPrint(&buf, "{d:0>2}:{d:0>2}", .{ hours, minutes }) catch return 1;
+        var text_buf: [16:0]u8 = undefined;
+        @memcpy(text_buf[0..len.len], len);
+        text_buf[len.len] = 0;
+        gtk_label_set_text(label, &text_buf);
+    }
+
+    // Update tab titles with CWD
+    for (g_tabs.items) |*tab| {
+        updateTabButtonLabel(tab);
+    }
+
+    return 1;
+}
+
+fn tab_clicked_cb(_: ?*GtkWidget, data: ?*anyopaque) callconv(.c) void {
+    if (data) |d| {
+        const idx = @as(*usize, @ptrCast(@alignCast(d))).*;
+        switchToTab(idx);
+    }
+    // Re-grab focus on GL area so keyboard input keeps working
+    if (g_gl_widget) |widget| {
+        gtk_widget_grab_focus(widget);
+    }
+}
+
+fn new_tab_clicked_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    createTab();
+    // Re-grab focus on GL area so keyboard input keeps working
+    if (g_gl_widget) |widget| {
+        gtk_widget_grab_focus(widget);
+    }
+}
+
+fn switchToTab(idx: usize) void {
+    if (idx >= g_tabs.items.len) return;
+    g_active_tab = idx;
+    g_pane_manager = g_tabs.items[idx].pane_manager;
+    
+    for (g_tabs.items, 0..) |*tab, i| {
+        if (tab.button) |btn| {
+            if (i == idx) {
+                gtk_widget_add_css_class(btn, "active-tab");
+            } else {
+                gtk_widget_remove_css_class(btn, "active-tab");
+            }
+        }
+    }
+    
+    queueRender();
+}
+
+fn createTab() void {
+    if (g_font == null) return;
+    
+    g_tab_counter += 1;
+    
+    const pm_ptr = std.heap.page_allocator.create(PaneManager) catch return;
+    pm_ptr.* = PaneManager.init(std.heap.page_allocator, g_font.?, INITIAL_COLS, INITIAL_ROWS) catch {
+        std.heap.page_allocator.destroy(pm_ptr);
+        return;
+    };
+    
+    if (g_fb_width > 0 and g_fb_height > 0) {
+        pm_ptr.handleResize(g_fb_width, g_fb_height) catch {};
+    }
+    
+    const tab_idx = g_tabs.items.len;
+    
+    var tab = Tab{
+        .pane_manager = pm_ptr,
+    };
+    tab.setTitleFmt("~", .{});
+    
+    g_tabs.append(std.heap.page_allocator, tab) catch {
+        pm_ptr.deinit();
+        std.heap.page_allocator.destroy(pm_ptr);
+        return;
+    };
+    
+    const button = gtk_button_new_with_label(tab.getTitle().ptr);
+    gtk_widget_add_css_class(button, "tab-button");
+    gtk_widget_add_css_class(button, "active-tab");
+    
+    const idx_ptr = std.heap.page_allocator.create(usize) catch return;
+    idx_ptr.* = tab_idx;
+    g_tab_indices.append(std.heap.page_allocator, idx_ptr) catch return;
+    _ = signalConnect(@ptrCast(button), "clicked", @ptrCast(@constCast(&tab_clicked_cb)), @ptrCast(idx_ptr));
+    
+    g_tabs.items[tab_idx].button = button;
+    
+    // Add to tab container (before "+" button)
+    if (g_tab_container) |container| {
+        gtk_box_append(container, @ptrCast(button));
+    }
+    
+    switchToTab(tab_idx);
+}
+
+fn closeActiveTab() void {
+    if (g_tabs.items.len <= 1) return;
+    
+    const idx = g_active_tab;
+    var tab = g_tabs.items[idx];
+    
+    // Remove the tab button from the tab container
+    if (tab.button) |btn| {
+        if (g_tab_container) |container| {
+            gtk_box_remove(container, btn);
+        }
+    }
+    
+    tab.pane_manager.deinit();
+    std.heap.page_allocator.destroy(tab.pane_manager);
+    
+    _ = g_tabs.swapRemove(idx);
+    
+    // Fix button index pointers after swapRemove — rebuild them
+    for (g_tabs.items, 0..) |*t, i| {
+        // Find and update the heap-allocated index for each tab's button
+        // We need to find the idx_ptr for this tab's button signal data
+        // Instead, reconnect signals with correct indices
+        if (t.button) |btn| {
+            const new_idx_ptr = std.heap.page_allocator.create(usize) catch continue;
+            new_idx_ptr.* = i;
+            g_tab_indices.append(std.heap.page_allocator, new_idx_ptr) catch continue;
+            // Disconnect old signal and reconnect with new index
+            // GTK4 doesn't have a simple disconnect, so we use g_signal_handlers_destroy_matched
+            // Simpler: just connect a new signal (old one will fire with stale index, but switchToTab checks bounds)
+            _ = signalConnect(@ptrCast(btn), "clicked", @ptrCast(@constCast(&tab_clicked_cb)), @ptrCast(new_idx_ptr));
+        }
+    }
+    
+    if (g_active_tab >= g_tabs.items.len) {
+        g_active_tab = g_tabs.items.len - 1;
+    }
+    
+    g_pane_manager = g_tabs.items[g_active_tab].pane_manager;
+    
+    switchToTab(g_active_tab);
+    
+    // Re-grab focus on GL area so keyboard input works
+    if (g_gl_widget) |widget| {
+        gtk_widget_grab_focus(widget);
+    }
+    queueRender();
+}
+
+fn loadCss() void {
+    const provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, TAB_CSS, -1);
+    const display = gdk_display_get_default();
+    if (display) |d| {
+        gtk_style_context_add_provider_for_display(d, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
 }
 
 fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
@@ -455,6 +788,18 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     gtk_window_set_title(g_window.?, "zest");
     gtk_window_set_default_size(g_window.?, 1280, 720);
 
+    // Apply CSS theme
+    loadCss();
+
+    // Create main vertical box
+    g_main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    
+    // Create overlay for GL area
+    g_overlay = gtk_overlay_new();
+    gtk_widget_set_vexpand(@ptrCast(g_overlay.?), 1);
+    gtk_widget_set_hexpand(@ptrCast(g_overlay.?), 1);
+    
+    // Create GL area
     g_gl_area = @ptrCast(gtk_gl_area_new());
     g_gl_widget = @ptrCast(g_gl_area.?);
     gtk_gl_area_set_auto_render(g_gl_area.?, 0);
@@ -465,8 +810,47 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     _ = signalConnect(@ptrCast(g_gl_area.?), "realize", @ptrCast(@constCast(&gl_realize_cb)), null);
     _ = signalConnect(@ptrCast(g_gl_area.?), "render", @ptrCast(@constCast(&gl_render_cb)), null);
     _ = signalConnect(@ptrCast(g_gl_area.?), "resize", @ptrCast(@constCast(&gl_resize_cb)), null);
-    gtk_window_set_child(g_window.?, @ptrCast(g_gl_area.?));
+    
+    gtk_overlay_set_child(@ptrCast(g_overlay.?), @ptrCast(g_gl_area.?));
 
+    // Add overlay to main box
+    gtk_box_append(@ptrCast(g_main_box.?), @ptrCast(g_overlay.?));
+
+    // Create tab bar: [scrolled_tabs] [+] [clock]
+    g_tab_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(@ptrCast(g_tab_bar.?), "tab-bar");
+    gtk_box_append(@ptrCast(g_main_box.?), @ptrCast(g_tab_bar.?));
+
+    // Scrollable tab container
+    g_tab_scrolled = gtk_scrolled_window_new(null, null);
+    gtk_scrolled_window_set_policy(@ptrCast(g_tab_scrolled.?), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+    gtk_widget_add_css_class(@ptrCast(g_tab_scrolled.?), "tab-scroll");
+    gtk_widget_set_hexpand(@ptrCast(g_tab_scrolled.?), 1);
+    gtk_box_append(@ptrCast(g_tab_bar.?), @ptrCast(g_tab_scrolled.?));
+
+    g_tab_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_scrolled_window_set_child(@ptrCast(g_tab_scrolled.?), @ptrCast(g_tab_container.?));
+
+    // Right section with gradient: [+] [clock]
+    g_right_section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(@ptrCast(g_right_section.?), "right-section");
+    gtk_box_append(@ptrCast(g_tab_bar.?), @ptrCast(g_right_section.?));
+
+    // "+" button for creating new tabs
+    g_new_tab_button = gtk_button_new_with_label("+");
+    gtk_widget_add_css_class(@ptrCast(g_new_tab_button.?), "new-tab-button");
+    _ = signalConnect(@ptrCast(g_new_tab_button.?), "clicked", @ptrCast(@constCast(&new_tab_clicked_cb)), null);
+    gtk_box_append(@ptrCast(g_right_section.?), @ptrCast(g_new_tab_button.?));
+
+    // Clock label
+    g_clock_label = gtk_label_new("00:00");
+    gtk_widget_add_css_class(@ptrCast(g_clock_label.?), "clock-label");
+    gtk_box_append(@ptrCast(g_right_section.?), @ptrCast(g_clock_label.?));
+
+    // Set main box as window child
+    gtk_window_set_child(g_window.?, @ptrCast(g_main_box.?));
+
+    // Setup input controllers on GL widget
     const widget = @as(*GtkWidget, @ptrCast(g_gl_area.?));
     const key_ctrl = gtk_event_controller_key_new();
     _ = signalConnect(@ptrCast(key_ctrl), "key-pressed", @ptrCast(@constCast(&key_pressed_cb)), null);
@@ -487,12 +871,15 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     _ = signalConnect(@ptrCast(motion), "motion", @ptrCast(@constCast(&mouse_motion_cb)), null);
     gtk_widget_add_controller(widget, @ptrCast(motion));
 
-    gtk_window_present(g_window.?);
-    updateSizes();
-
     const scroll = gtk_event_controller_scroll_new(1);
     _ = signalConnect(@ptrCast(scroll), "scroll", @ptrCast(@constCast(&scroll_cb)), null);
     gtk_widget_add_controller(widget, @ptrCast(scroll));
+
+    gtk_window_present(g_window.?);
+    updateSizes();
+
+    // Start clock timer
+    _ = g_timeout_add(1000, clock_tick, null);
 }
 
 pub fn main() !void {

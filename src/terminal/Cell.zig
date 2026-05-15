@@ -74,9 +74,18 @@ pub const Color = struct {
 
     pub fn toFloats(self: Color) [3]f32 {
         return .{
-            @as(f32, @floatFromInt(self.r)) / 255.0,
-            @as(f32, @floatFromInt(self.g)) / 255.0,
-            @as(f32, @floatFromInt(self.b)) / 255.0,
+            @as(f32, @floatFromInt(self.r)) * (1.0 / 255.0),
+            @as(f32, @floatFromInt(self.g)) * (1.0 / 255.0),
+            @as(f32, @floatFromInt(self.b)) * (1.0 / 255.0),
+        };
+    }
+
+    pub fn toFloatsFast(color: Color) [3]f32 {
+        const inv = 1.0 / 255.0;
+        return .{
+            @as(f32, @floatFromInt(color.r)) * inv,
+            @as(f32, @floatFromInt(color.g)) * inv,
+            @as(f32, @floatFromInt(color.b)) * inv,
         };
     }
 };

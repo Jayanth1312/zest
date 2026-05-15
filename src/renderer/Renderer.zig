@@ -56,6 +56,7 @@ pub const Renderer = struct {
     shader_program: c.GLuint,
     vao: c.GLuint,
     vbo: c.GLuint,
+    vbo_size: isize,
     atlas: Atlas.Atlas,
     font: *Font.Font,
     fallback_font: ?*Font.Font,
@@ -124,6 +125,7 @@ pub const Renderer = struct {
             .shader_program = program,
             .vao = vao,
             .vbo = vbo,
+            .vbo_size = 0,
             .atlas = atlas,
             .font = font,
             .fallback_font = fallback_font,
@@ -158,21 +160,45 @@ pub const Renderer = struct {
     ) void {
         c.glUseProgram(self.shader_program);
 
-        // Build orthographic projection using PHYSICAL framebuffer coordinates
         const w: f32 = @floatFromInt(fb_width);
         const h: f32 = @floatFromInt(fb_height);
         const proj = ortho(0.0, w, h, 0.0, -1.0, 1.0);
         c.glUniformMatrix4fv(self.proj_loc, 1, c.GL_FALSE, &proj);
 
-        // Set atlas texture
         c.glActiveTexture(c.GL_TEXTURE0);
         c.glBindTexture(c.GL_TEXTURE_2D, self.atlas.texture_id);
 
-        // Build vertex data for all cells using PHYSICAL pixel coordinates
         const cw: f32 = @floatFromInt(self.font.cell_width);
         const ch: f32 = @floatFromInt(self.font.cell_height);
         const atlas_w: f32 = @floatFromInt(self.atlas.width);
         const atlas_h: f32 = @floatFromInt(self.atlas.height);
+
+        // Pre-compute selection bounds once outside the loop
+        var sel_r0: u32 = 0;
+        var sel_c0: u32 = 0;
+        var sel_r1: u32 = 0;
+        var sel_c1: u32 = 0;
+        const has_selection = if (sel_start != null and sel_end != null) blk: {
+            var r0 = sel_start.?.row;
+            var c0 = sel_start.?.col;
+            var r1 = sel_end.?.row;
+            var c1 = sel_end.?.col;
+            if (r0 > r1 or (r0 == r1 and c0 > c1)) {
+                const temp_r = r0; r0 = r1; r1 = temp_r;
+                const temp_c = c0; c0 = c1; c1 = temp_c;
+            }
+            sel_r0 = r0; sel_c0 = c0; sel_r1 = r1; sel_c1 = c1;
+            break :blk true;
+        } else false;
+
+        // Pre-compute cursor blink state
+        const cursor_blink_on = if (focused) blk: {
+            const time_since_input = current_time - last_input_time;
+            break :blk if (time_since_input < 2.0) true else @mod(current_time, 1.0) < 0.6;
+        } else false;
+
+        // Pre-compute blink visibility
+        const blink_visible = @mod(current_time, 1.0) >= 0.5;
 
         var vertex_count: u32 = 0;
         var row: u32 = 0;
@@ -181,7 +207,6 @@ pub const Renderer = struct {
             while (col < grid.cols) : (col += 1) {
                 const cell = grid.cellAt(col, row);
 
-                // Skip wide character placeholders
                 if (cell.char == 0 and col > 0) {
                     const prev_cell = grid.cellAt(col - 1, row);
                     if (Terminal.Terminal.isWide(prev_cell.char)) continue;
@@ -190,25 +215,17 @@ pub const Renderer = struct {
                 var fg_color = cell.fg;
                 var bg_color = cell.bg;
 
-                // Selection highlight: invert colors
-                if (sel_start != null and sel_end != null) {
-                    var r0 = sel_start.?.row;
-                    var c0 = sel_start.?.col;
-                    var r1 = sel_end.?.row;
-                    var c1 = sel_end.?.col;
-                    if (r0 > r1 or (r0 == r1 and c0 > c1)) {
-                        const temp_r = r0; r0 = r1; r1 = temp_r;
-                        const temp_c = c0; c0 = c1; c1 = temp_c;
-                    }
+                // Selection highlight using pre-computed bounds
+                if (has_selection) {
                     var in_selection = false;
-                    if (row > r0 and row < r1) {
+                    if (row > sel_r0 and row < sel_r1) {
                         in_selection = true;
-                    } else if (row == r0 and row == r1) {
-                        in_selection = col >= c0 and col <= c1;
-                    } else if (row == r0) {
-                        in_selection = col >= c0;
-                    } else if (row == r1) {
-                        in_selection = col <= c1;
+                    } else if (row == sel_r0 and row == sel_r1) {
+                        in_selection = col >= sel_c0 and col <= sel_c1;
+                    } else if (row == sel_r0) {
+                        in_selection = col >= sel_c0;
+                    } else if (row == sel_r1) {
+                        in_selection = col <= sel_c1;
                     }
                     if (in_selection) {
                         const temp = fg_color;
@@ -221,28 +238,19 @@ pub const Renderer = struct {
                     }
                 }
 
-                // Attribute handling: Inverse
                 if (cell.attrs.inverse) {
                     const temp = fg_color;
                     fg_color = bg_color;
                     bg_color = temp;
                 }
 
-                // Attribute handling: Blink
-                if (cell.attrs.blink) {
-                    if (@mod(current_time, 1.0) < 0.5) {
-                        fg_color = bg_color;
-                    }
+                if (cell.attrs.blink and blink_visible) {
+                    fg_color = bg_color;
                 }
 
-                // Cursor blink: visible for 2s after input, then blink at 1Hz
-                if (focused and col == cursor_col and row == cursor_row) {
-                    const time_since_input = current_time - last_input_time;
-                    const cursor_on = if (time_since_input < 2.0) true else @mod(current_time, 1.0) < 0.6;
-                    if (cursor_on) {
-                        bg_color = Cell.Color.base05;
-                        fg_color = Cell.Color.base00;
-                    }
+                if (focused and col == cursor_col and row == cursor_row and cursor_blink_on) {
+                    bg_color = Cell.Color.base05;
+                    fg_color = Cell.Color.base00;
                 }
 
                 const char_idx = if (cell.char == 0) @as(u21, ' ') else cell.char;
@@ -255,14 +263,12 @@ pub const Renderer = struct {
                 const fg = fg_color.toFloats();
                 const bg = bg_color.toFloats();
 
-                // Cell position in PHYSICAL pixels — no snapping needed
                 const is_wide = Terminal.Terminal.isWide(cell.char);
                 const x0: f32 = @as(f32, @floatFromInt(col)) * cw + offset_x;
                 const y0: f32 = @as(f32, @floatFromInt(row)) * ch + offset_y;
                 const x1: f32 = x0 + (if (is_wide) 2.0 * cw else cw);
                 const y1: f32 = y0 + ch;
 
-                // Atlas UVs for this glyph's cell
                 const tex_u0: f32 = @as(f32, @floatFromInt(glyph.atlas_x)) / atlas_w;
                 const tex_v0: f32 = @as(f32, @floatFromInt(glyph.atlas_y)) / atlas_h;
                 const tex_u1: f32 = @as(f32, @floatFromInt(glyph.atlas_x + glyph.width)) / atlas_w;
@@ -271,11 +277,9 @@ pub const Renderer = struct {
                 const base = vertex_count * FLOATS_PER_CELL;
                 if (base + FLOATS_PER_CELL > self.vertex_buf.len) break;
 
-                // Triangle 1: top-left, top-right, bottom-left
                 writeVertex(self.vertex_buf, base + 0 * FLOATS_PER_VERTEX, x0, y0, tex_u0, tex_v0, fg, bg);
                 writeVertex(self.vertex_buf, base + 1 * FLOATS_PER_VERTEX, x1, y0, tex_u1, tex_v0, fg, bg);
                 writeVertex(self.vertex_buf, base + 2 * FLOATS_PER_VERTEX, x0, y1, tex_u0, tex_v1, fg, bg);
-                // Triangle 2: top-right, bottom-right, bottom-left
                 writeVertex(self.vertex_buf, base + 3 * FLOATS_PER_VERTEX, x1, y0, tex_u1, tex_v0, fg, bg);
                 writeVertex(self.vertex_buf, base + 4 * FLOATS_PER_VERTEX, x1, y1, tex_u1, tex_v1, fg, bg);
                 writeVertex(self.vertex_buf, base + 5 * FLOATS_PER_VERTEX, x0, y1, tex_u0, tex_v1, fg, bg);
@@ -284,11 +288,14 @@ pub const Renderer = struct {
             }
         }
 
-        // Upload and draw
         c.glBindVertexArray(self.vao);
         c.glBindBuffer(c.GL_ARRAY_BUFFER, self.vbo);
         const data_size: isize = @intCast(vertex_count * FLOATS_PER_CELL * @sizeOf(f32));
-        c.glBufferData(c.GL_ARRAY_BUFFER, data_size, self.vertex_buf.ptr, c.GL_DYNAMIC_DRAW);
+        if (self.vbo_size < data_size) {
+            c.glBufferData(c.GL_ARRAY_BUFFER, @max(data_size, self.vbo_size * 2), null, c.GL_DYNAMIC_DRAW);
+            self.vbo_size = @max(data_size, self.vbo_size * 2);
+        }
+        c.glBufferSubData(c.GL_ARRAY_BUFFER, 0, data_size, self.vertex_buf.ptr);
         c.glDrawArrays(c.GL_TRIANGLES, 0, @intCast(vertex_count * VERTICES_PER_CELL));
         c.glBindVertexArray(0);
     }

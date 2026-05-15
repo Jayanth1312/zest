@@ -68,7 +68,8 @@ pub const Grid = struct {
     pub fn scrollRegionUp(self: *Grid, top: u32, bottom: u32, count: u32, fill_cell: Cell.Cell) void {
         if (top >= bottom or bottom >= self.rows) return;
         const n = @min(count, bottom - top + 1);
-        
+        if (n == 0) return;
+
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             const save = self.row_indices[top];
@@ -77,8 +78,7 @@ pub const Grid = struct {
                 self.row_indices[r] = self.row_indices[r + 1];
             }
             self.row_indices[bottom] = save;
-            
-            // Clear the new row at the bottom
+
             const phys_row = save;
             const start = @as(usize, phys_row) * self.cols;
             @memset(self.cells[start .. start + self.cols], fill_cell);
@@ -89,7 +89,8 @@ pub const Grid = struct {
     pub fn scrollRegionDown(self: *Grid, top: u32, bottom: u32, count: u32, fill_cell: Cell.Cell) void {
         if (top >= bottom or bottom >= self.rows) return;
         const n = @min(count, bottom - top + 1);
-        
+        if (n == 0) return;
+
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             const save = self.row_indices[bottom];
@@ -98,8 +99,7 @@ pub const Grid = struct {
                 self.row_indices[r] = self.row_indices[r - 1];
             }
             self.row_indices[top] = save;
-            
-            // Clear the new row at the top
+
             const phys_row = save;
             const start = @as(usize, phys_row) * self.cols;
             @memset(self.cells[start .. start + self.cols], fill_cell);

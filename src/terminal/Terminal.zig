@@ -49,6 +49,13 @@ pub const Terminal = struct {
     alt_screen_grid: ?Grid.Grid = null,
     using_alt_screen: bool = false,
 
+    osc_buf: [256]u8 = undefined,
+    osc_len: usize = 0,
+    osc_num: u8 = 0,
+
+    command_history: std.ArrayListUnmanaged([]u8) = .empty,
+    max_history: usize = 200,
+
     pub fn init(allocator: std.mem.Allocator, cols: u32, rows: u32) !Terminal {
         return Terminal{
             .grid = try Grid.Grid.init(allocator, cols, rows),
@@ -71,6 +78,9 @@ pub const Terminal = struct {
             .utf8_len = 0,
             .utf8_expected = 0,
             .allocator = allocator,
+            .osc_buf = undefined,
+            .osc_len = 0,
+            .osc_num = 0,
         };
     }
 
@@ -79,6 +89,10 @@ pub const Terminal = struct {
         if (self.alt_screen_grid) |*alt| {
             alt.deinit();
         }
+        for (self.command_history.items) |cmd| {
+            self.allocator.free(cmd);
+        }
+        self.command_history.deinit(self.allocator);
     }
 
     /// Feed raw bytes from PTY into the parser.
@@ -89,33 +103,34 @@ pub const Terminal = struct {
     }
 
     fn processByte(self: *Terminal, byte: u8) void {
-        // If it's an ESC, abort current sequence and immediately transition to escape state
         if (byte == 0x1B) {
+            if (self.state == .osc_string) {
+                self.finishOsc();
+            }
             self.state = .escape;
             return;
         }
 
-        // Handle C0 control chars in any state
         switch (byte) {
-            0x07 => { // BEL — terminate OSC if in it, otherwise ignore
+            0x07 => {
                 if (self.state == .osc_string) {
-                    self.state = .ground;
+                    self.finishOsc();
                 }
                 return;
             },
-            0x08 => { // BS — backspace
+            0x08 => {
                 if (self.cursor_col > 0) self.cursor_col -= 1;
                 return;
             },
-            0x09 => { // TAB
+            0x09 => {
                 self.cursor_col = @min(self.cols - 1, (self.cursor_col + 8) & ~@as(u32, 7));
                 return;
             },
-            0x0A, 0x0B, 0x0C => { // LF, VT, FF — line feed
+            0x0A, 0x0B, 0x0C => {
                 self.lineFeed();
                 return;
             },
-            0x0D => { // CR — carriage return
+            0x0D => {
                 self.cursor_col = 0;
                 return;
             },
@@ -129,7 +144,6 @@ pub const Terminal = struct {
             .csi_param => self.processCsiParam(byte),
             .osc_string => self.processOsc(byte),
             .charset => {
-                // Ignore the charset designator byte (e.g. 'B', '0') and return to ground
                 self.state = .ground;
             },
         }
@@ -175,37 +189,42 @@ pub const Terminal = struct {
                 self.csi_private = false;
                 @memset(&self.params, 0);
             },
-            ']', 'P', '_', '^', 'X' => { // OSC, DCS, APC, PM, SOS
-                // These all consume strings until ST (ESC \) or BEL
+            ']' => {
                 self.state = .osc_string;
+                self.osc_len = 0;
+                self.osc_num = 0;
             },
-            'D' => { // IND — Index (line feed)
+            'P', '_', '^', 'X' => {
+                self.state = .osc_string;
+                self.osc_len = 0;
+            },
+            'D' => {
                 self.lineFeed();
                 self.state = .ground;
             },
-            'E' => { // NEL — Next Line
+            'E' => {
                 self.cursor_col = 0;
                 self.lineFeed();
                 self.state = .ground;
             },
-            'M' => { // RI — Reverse Index
+            'M' => {
                 self.reverseIndex();
                 self.state = .ground;
             },
-            '7' => { // DECSC — Save Cursor
+            '7' => {
                 self.saved_cursor_col = self.cursor_col;
                 self.saved_cursor_row = self.cursor_row;
                 self.state = .ground;
             },
-            '8' => { // DECRC — Restore Cursor
+            '8' => {
                 self.cursor_col = self.saved_cursor_col;
                 self.cursor_row = self.saved_cursor_row;
                 self.state = .ground;
             },
-            '(', ')', '*', '+' => { // Charset designation (G0, G1, G2, G3)
+            '(', ')', '*', '+' => {
                 self.state = .charset;
             },
-            '\\', 'c' => { // ST (String Terminator), RIS (Reset to Initial State)
+            '\\', 'c' => {
                 self.state = .ground;
             },
             else => {
@@ -245,10 +264,27 @@ pub const Terminal = struct {
     }
 
     fn processOsc(self: *Terminal, byte: u8) void {
-        // OSC string eats all bytes until BEL (0x07) or ESC (0x1B)
-        // Handled in processByte
-        _ = self;
-        _ = byte;
+        if (self.osc_len < self.osc_buf.len) {
+            self.osc_buf[self.osc_len] = byte;
+            self.osc_len += 1;
+        }
+    }
+
+    fn finishOsc(self: *Terminal) void {
+        self.state = .ground;
+        if (self.osc_len == 0) return;
+
+        // Parse OSC number (e.g., "0;" for title, "1;" for icon)
+        var num_end: usize = 0;
+        while (num_end < self.osc_len and self.osc_buf[num_end] != ';') : (num_end += 1) {}
+        if (num_end >= self.osc_len) return;
+
+        self.osc_num = std.fmt.parseInt(u8, self.osc_buf[0..num_end], 10) catch return;
+        const payload = self.osc_buf[num_end + 1 .. self.osc_len];
+
+        // OSC 0, 1, 2: set window/icon title (we just ignore for now)
+        _ = self.osc_num;
+        _ = payload;
     }
 
     fn dispatchCsi(self: *Terminal, cmd: u8) void {
@@ -553,45 +589,46 @@ pub const Terminal = struct {
 
     fn eraseCursorToEnd(self: *Terminal) void {
         self.eraseCursorToEol();
+        const fill = self.currentFillCell();
         var row = self.cursor_row + 1;
         while (row < self.rows) : (row += 1) {
-            var col: u32 = 0;
-            while (col < self.cols) : (col += 1) {
-                self.grid.setCellAt(col, row, self.currentFillCell());
-            }
+            const phys_row = self.grid.row_indices[@as(usize, row)];
+            const start = @as(usize, phys_row) * self.grid.cols;
+            @memset(self.grid.cells[start .. start + self.grid.cols], fill);
         }
     }
 
     fn eraseStartToCursor(self: *Terminal) void {
         self.eraseBolToCursor();
+        const fill = self.currentFillCell();
         var row: u32 = 0;
         while (row < self.cursor_row) : (row += 1) {
-            var col: u32 = 0;
-            while (col < self.cols) : (col += 1) {
-                self.grid.setCellAt(col, row, self.currentFillCell());
-            }
+            const phys_row = self.grid.row_indices[@as(usize, row)];
+            const start = @as(usize, phys_row) * self.grid.cols;
+            @memset(self.grid.cells[start .. start + self.grid.cols], fill);
         }
     }
 
     fn eraseCursorToEol(self: *Terminal) void {
-        var col = self.cursor_col;
-        while (col < self.cols) : (col += 1) {
-            self.grid.setCellAt(col, self.cursor_row, self.currentFillCell());
-        }
+        const fill = self.currentFillCell();
+        const phys_row = self.grid.row_indices[@as(usize, self.cursor_row)];
+        const start = @as(usize, phys_row) * self.grid.cols + @as(usize, self.cursor_col);
+        const end = @as(usize, phys_row) * self.grid.cols + @as(usize, self.grid.cols);
+        @memset(self.grid.cells[start..end], fill);
     }
 
     fn eraseBolToCursor(self: *Terminal) void {
-        var col: u32 = 0;
-        while (col <= self.cursor_col and col < self.cols) : (col += 1) {
-            self.grid.setCellAt(col, self.cursor_row, self.currentFillCell());
-        }
+        const fill = self.currentFillCell();
+        const phys_row = self.grid.row_indices[@as(usize, self.cursor_row)];
+        const start = @as(usize, phys_row) * self.grid.cols;
+        const end = start + @as(usize, self.cursor_col) + 1;
+        @memset(self.grid.cells[start..end], fill);
     }
 
     fn eraseEntireLine(self: *Terminal) void {
-        var col: u32 = 0;
-        while (col < self.cols) : (col += 1) {
-            self.grid.setCellAt(col, self.cursor_row, Cell.Cell.blank);
-        }
+        const phys_row = self.grid.row_indices[@as(usize, self.cursor_row)];
+        const start = @as(usize, phys_row) * self.grid.cols;
+        @memset(self.grid.cells[start .. start + self.grid.cols], Cell.Cell.blank);
     }
 
     fn insertLines(self: *Terminal, count: u32) void {
@@ -619,11 +656,15 @@ pub const Terminal = struct {
 
     fn insertChars(self: *Terminal, count: u32) void {
         const n = @min(count, self.cols - self.cursor_col);
-        var col = self.cols - 1;
-        while (col >= self.cursor_col + n) : (col -= 1) {
-            const cell = self.grid.cellAt(col - n, self.cursor_row);
-            self.grid.setCellAt(col, self.cursor_row, cell);
-            if (col == self.cursor_col + n) break;
+        var col: u32 = n;
+        while (col > 0) {
+            col -= 1;
+            const src = self.cursor_col + col;
+            const dst = src + n;
+            if (dst < self.cols) {
+                const cell = self.grid.cellAt(src, self.cursor_row);
+                self.grid.setCellAt(dst, self.cursor_row, cell);
+            }
         }
         var i: u32 = 0;
         while (i < n) : (i += 1) {
@@ -644,17 +685,21 @@ pub const Terminal = struct {
         }
         self.grid.deinit();
         self.grid = new_grid;
-        self.cols = new_cols;
-        self.rows = new_rows;
-        self.cursor_col = @min(self.cursor_col, new_cols -| 1);
-        self.cursor_row = @min(self.cursor_row, new_rows -| 1);
-        self.scroll_top = 0;
-        self.scroll_bottom = new_rows - 1;
 
         if (self.alt_screen_grid) |*alt| {
-            var new_alt = Grid.Grid.init(self.allocator, new_cols, new_rows) catch return;
-            const ac = @min(self.cols, new_cols);
-            const ar = @min(self.rows, new_rows);
+            const old_alt_cols = alt.cols;
+            const old_alt_rows = alt.rows;
+            var new_alt = Grid.Grid.init(self.allocator, new_cols, new_rows) catch {
+                self.cols = new_cols;
+                self.rows = new_rows;
+                self.cursor_col = @min(self.cursor_col, new_cols -| 1);
+                self.cursor_row = @min(self.cursor_row, new_rows -| 1);
+                self.scroll_top = 0;
+                self.scroll_bottom = new_rows - 1;
+                return;
+            };
+            const ac = @min(old_alt_cols, new_cols);
+            const ar = @min(old_alt_rows, new_rows);
             var r: u32 = 0;
             while (r < ar) : (r += 1) {
                 var c: u32 = 0;
@@ -665,6 +710,13 @@ pub const Terminal = struct {
             alt.deinit();
             self.alt_screen_grid = new_alt;
         }
+
+        self.cols = new_cols;
+        self.rows = new_rows;
+        self.cursor_col = @min(self.cursor_col, new_cols -| 1);
+        self.cursor_row = @min(self.cursor_row, new_rows -| 1);
+        self.scroll_top = 0;
+        self.scroll_bottom = new_rows - 1;
     }
 
     fn enterAltScreen(self: *Terminal) void {

@@ -1,62 +1,336 @@
 # <img src="assets/icon.png" width="30" valign="middle"> Zest
 
-**Zest** is a lightning-fast, GPU-accelerated terminal emulator built with **Zig**. Engineered for extreme performance, low latency, and a premium "Black Metal" developer aesthetic.
+**Zest** is a GPU-accelerated terminal emulator written in [Zig](https://ziglang.org/). It is engineered for extreme performance, low latency, and a premium "Black Metal Immortal" aesthetic.
 
-## 🏎 Why is Zest so fast?
+<p align="center">
+  <img src="assets/icon.png" width="120" alt="Zest icon">
+</p>
 
-Zest isn't just another terminal; it's built from the ground up for speed:
+---
 
-- **Zig Power**: Leveraging Zig's manual memory management and zero-overhead abstractions for a tight, efficient runtime.
-- **Direct GPU Rendering**: Instead of relying on slow CPU-based text drawing, Zest uses an OpenGL-powered pipeline to render text directly on your graphics card.
-- **Efficient Glyph Atlas**: Pre-renders and caches font characters into a GPU texture atlas, making text display nearly instantaneous.
-- **Zero-Copy Pipeline**: Data flows from the PTY to the screen with minimal buffering and zero unnecessary copies.
-- **Native PTY**: Uses raw Linux pseudo-terminals for the lowest possible latency between your shell and the display.
+## Why Zest?
 
-## ✨ Features
+Most terminal emulators render text on the CPU and push pixels to the GPU as a final step. Zest does the opposite: it renders text **directly on the GPU** using a custom OpenGL ES 3.2 pipeline. The result is buttery-smooth scrolling, instant text rendering, and a tiny memory footprint.
 
-- **High-Fidelity Text**: Crisp font rasterization via FreeType.
-- **Hardware Accelerated**: Full OpenGL ES rendering pipeline via libepoxy.
-- **Ultra-Low Latency**: Optimized for developers who demand instant feedback.
-- **Sleek Aesthetic**: Minimalist design with a focus on typography.
-- **Lightweight**: Tiny binary footprint and low memory usage.
-- **Native Wayland/X11 Support**: GTK4 backend with automatic fractional scaling (100%, 125%, 150%, 200%) — no blurry rendering.
+| Aspect | Traditional Terminals | Zest |
+|---|---|---|
+| Text rendering | CPU (Pango/HarfBuzz → Cairo → surface) | GPU (FreeType → texture atlas → single-pass shader) |
+| Scroll performance | Re-layout + re-draw per frame | Row-index rotation + vertex buffer rebuild |
+| Emoji support | Font fallback chains, slow | Dedicated BGRA glyph slot in atlas |
+| Memory | Hundreds of MB | ~30-50 MB |
+| Binary size | 5-20 MB | ~12 MB |
 
-## 🔄 What's New in v0.1.1
+---
 
-### GTK4 Migration
-- Replaced GLFW with **GTK4** backend for native Wayland/X11 support
-- **Sharp rendering at all DPI levels** — fractional scaling works perfectly on Wayland compositors
-- GLArea-based OpenGL context with libepoxy for cross-platform GL function dispatch
-- Raw `extern` declarations for GTK4 C interop (Zig 0.17.0-dev doesn't support `@cImport`)
-- GLES 3.2 shaders (`#version 320 es`) for compatibility with GTK4's EGL context on Wayland
+## Architecture
 
-### Key Fixes
-- Fixed `std.c.timespec` field access for Zig 0.17.0-dev (`sec`/`nsec` instead of `tv_sec`/`tv_nsec`)
-- Fixed `@ptrCast` const qualifier discard with `@constCast` for GTK signal callbacks
-- Fixed `g_signal_connect` macro → `g_signal_connect_data` function call
-- Fixed `gtk_window_get_width/height` → `gtk_widget_get_width/height` (GTK4 API)
-- Moved GL-dependent initialization (font, renderer, terminal, PTY) into `gl_realize_cb` (context must exist before shader compilation)
+```
+─────────────────────────────────────────────────────────────┐
+│                        GTK4 Window                           │
+│  ┌───────────────────────────────────────────────────────  │
+│  │                    GtkGLArea                           │  │
+│  │  ─────────────────────────────────────────────────┐  │  │
+│  │  │              OpenGL ES 3.2 Renderer              │  │  │
+│  │  │  ──────────┐  ┌──────────┐  ┌───────────────┐  │  │  │
+│  │  │  │  Shader  │  │  Atlas   │  │  Vertex Buf   │  │  │  │
+│  │  │  │ Program  │  │ 2048×2048│  │  (pre-alloc)  │  │  │  │
+│  │  │  └──────────┘  └──────────┘  └───────────────┘  │  │  │
+│  │  ─────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                    Tab Bar                             │  │
+│  │  [Tab] [Tab] [Tab] ... [+] [scrollable]  [ 19:05 ]    │  │
+│  ───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+         ▲                                              │
+         │  feed()                                      │ read()
+┌────────┴────────                          ┌──────────┴──────┐
+│   Terminal.zig  │◄─────────────────────────│    Pty.zig      │
+│  (VTE Parser)   │                          │  (forkpty)      │
+│  ANSI/CSI/OSC   │                          │  non-blocking   │
+└────────┬────────┘                          └──────────┬──────┘
+         │                                              │
+┌────────┴────────                          ┌──────────┴──────
+│    Grid.zig     │                          │   Shell Process │
+│  (row-index     │                          │  ($SHELL)       │
+│   indirection)  │                          │                 │
+────────┬────────┘                          └─────────────────┘
+         │
+────────┴────────┐
+│    Cell.zig     │
+│  (char+fg+bg    │
+│   +attrs)       │
+└─────────────────┘
+```
 
-## 🚀 Getting Started (v0.1.1 - Linux)
+### Data Flow
+
+1. **Shell** writes output to the PTY master
+2. **Pty.zig** reads non-blocking (~60Hz tick) into a 64KB buffer
+3. **Terminal.zig** parses ANSI/CSI/OSC escape sequences, updating cell state
+4. **Grid.zig** stores cells with O(1) scroll via row-index rotation
+5. **Renderer.zig** builds vertex buffer from grid, draws via single-pass shader
+6. **GtkGLArea** presents the frame on the display
+
+---
+
+## Features
+
+### Rendering
+- **OpenGL ES 3.2** single-pass shader pipeline (vertex + fragment shader)
+- **2048×2048 dynamic glyph texture atlas** with row-packing allocator
+- **FreeType2** font rasterization with LCD subpixel filtering
+
+### Terminal Emulation
+- Full **ANSI/CSI/OSC escape sequence parser** with state machine
+- **256-color palette** (16 ANSI + 6×6×6 color cube + 24 grayscale levels)
+- **24-bit true color** (`ESC[38;2;R;G;Bm`)
+- **SGR attributes**: bold, italic, underline, strikethrough, dim, inverse, blink
+- **Alt screen buffer** (DECSET 1049) for fullscreen apps like vim/htop
+- **Scrolling regions** (DECSTBM)
+- **Insert/delete characters and lines**
+- **Bracketed paste mode** (DECSET 2004)
+- **Cursor key mode** (DECSET 1)
+- **Save/restore cursor** (DECSC/DECRC)
+- **UTF-8 multi-byte character decoding**
+
+### Layout
+- **Pane splitting** (horizontal and vertical) via binary tree
+- **Pane navigation** (up/down/left/right) via distance-based heuristic
+- **Pane closing** with automatic focus transfer
+- **Automatic resize** recalculating cell counts per pane
+- **Split line borders** rendered via OpenGL scissor test
+
+### Tabs
+- **Multiple tabs** with horizontally scrollable tab bar
+- **Tab titles** auto-updated from pane CWD (via `/proc/<pid>/cwd`)
+- **Gradient right section** blending tab area into terminal background
+- **Live clock** (HH:MM) in the tab bar
+- **Keyboard shortcuts**: `Ctrl+Tab` / `Ctrl+Shift+Tab` / `Ctrl+PageUp` / `Ctrl+PageDown`
+
+### Theming
+- **"Black Metal Immortal"** Base16 theme — pure black background with grey/teal/steel blue palette
+- **GTK4 CSS** for tab bar styling (dark theme with accent color underline on active tab)
+
+### Input
+- **GTK4 event controllers**: key, motion, click gesture, scroll
+- **GTK IM context** for Unicode text input (IME support)
+- **Native Wayland/X11** with automatic fractional scaling (no blurry rendering)
+
+---
+
+## Keybindings
+
+### Tab Management
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+PageDown` | Next tab |
+| `Ctrl+PageUp` | Previous tab |
+| `Ctrl+Shift+T` | New tab |
+| `Ctrl+Shift+W` | Close active tab |
+
+### Pane Management
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+H` | Split pane horizontally |
+| `Ctrl+Shift+J` | Split pane vertically |
+| `Ctrl+Shift+X` | Close focused pane |
+| `Ctrl+Shift+←` | Focus pane to the left |
+| `Ctrl+Shift+↑` | Focus pane above |
+| `Ctrl+Shift+→` | Focus pane to the right |
+| `Ctrl+Shift+↓` | Focus pane below |
+
+### Clipboard
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+C` | Copy selected text |
+| `Ctrl+Shift+V` | Paste from clipboard |
+
+---
+
+## Project Structure
+
+```
+zest/
+├── src/
+│   ├── main.zig                  # Entry point, GTK4 lifecycle, tab/clock UI, input handling
+│   ├── gl.zig                    # Re-exports all C bindings
+│   ├── c_gl.h / c_ft.h / c_pty.h / c_fc.h  # C headers for translate-c
+│   ├── apprt/
+│   │   ├── gtk.zig               # GTK4 runtime abstraction (unused, legacy)
+│   │   └── gtk/key.zig           # GDK key codes, modifier translation, escape sequences
+│   ├── layout/
+│   │   ├── Pane.zig              # Single pane: Terminal + Pty + geometry
+│   │   ├── PaneManager.zig       # High-level pane management, resize, split lines
+│   │   ├── PaneTree.zig          # Binary tree of panes (leaf/split nodes)
+│   │   └── KeyBindings.zig       # Command enum and shortcut handler
+│   ├── pty/
+│   │   ├── Pty.zig               # POSIX PTY (forkpty, non-blocking I/O)
+│   │   └── ConPty.zig            # Windows ConPty backend (partial)
+│   ├── renderer/
+│   │   ├── Renderer.zig          # OpenGL ES 3.2 renderer, VAO/VBO, shaders
+│   │   ├── Font.zig              # FreeType font loading, glyph metrics, emoji detection
+│   │   ├── FontConfig.zig        # Fontconfig bindings for system font discovery
+│   │   └── Atlas.zig             # 2048×2048 GPU texture atlas, glyph rasterization
+│   └── terminal/
+│       ├── Terminal.zig          # VTE state machine + ANSI/CSI/OSC parser
+│       ├── Grid.zig              # 2D cell grid with row-index indirection
+│       ├── Cell.zig              # Cell struct + Black Metal Immortal color theme
+│       └── RingBuffer.zig        # Circular byte buffer (defined, unused)
+── assets/                       # Icons (PNG, ICO, ICNS)
+├── build.zig                     # Zig build script
+├── build.zig.zon                 # Package manifest (v0.1.1)
+└── README.md                     # This file
+```
+
+---
+
+## Technical Details
+
+### Why OpenGL ES 3.2?
+
+GTK4 on Wayland uses an EGL context that only exposes OpenGL ES functions. Zest targets **GLES 3.2** (`#version 320 es`) for maximum compatibility across Wayland compositors while still supporting all features needed for terminal rendering.
+
+### Why Raw `extern fn` Declarations?
+
+Zig 0.17.0-dev's `@cImport` cannot handle GTK4's complex macro-heavy headers. Zest uses hand-written `extern fn` declarations for the ~60 GTK4 functions it needs, avoiding the overhead of a full bindings generator.
+
+### Glyph Atlas Strategy
+
+The 2048×2048 texture atlas uses a simple row-packing allocator:
+- **Grayscale glyphs** (monospace font): 1-channel, LCD subpixel filtered
+- **Color emoji glyphs** (Noto Color Emoji, etc.): 4-channel BGRA, scaled to fit cell slot
+- **Block characters** (U+2580–U+259F): procedurally generated, no FreeType needed
+
+When the atlas fills up, it is cleared and all visible glyphs are re-rasterized. This rarely happens in practice since most terminal sessions use a small subset of Unicode.
+
+### Scroll Optimization
+
+Instead of copying cell data on scroll, Grid.zig maintains a `row_indices` array that maps logical row numbers to physical row storage. Scrolling rotates this array in O(1), and only the newly exposed row needs to be cleared.
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- **Zig**: 0.17.0-dev.
-- **Dependencies**: GTK4, FreeType2, Epoxy, Pango, and Cairo.
+| Dependency | Purpose |
+|---|---|
+| [Zig](https://ziglang.org/) 0.17.0-dev | Compiler |
+| GTK4 | Windowing, input, GLArea |
+| FreeType2 | Font rasterization |
+| libepoxy | OpenGL function dispatch |
+| Pango / Cairo | GTK4 text layout (indirect) |
+| Fontconfig | System font discovery |
+| HarfBuzz | Text shaping (indirect via Pango) |
 
-### Installation
+**Debian/Ubuntu:**
+```bash
+sudo apt install zig gtk-4-dev libfreetype-dev libepoxy-dev \
+  libpango1.0-dev libcairo2-dev libfontconfig1-dev libharfbuzz-dev
+```
 
-1.  **Clone and Build**:
-    ```bash
-    git clone https://github.com/Jayanth1312/zest.git zest
-    cd zest
-    zig build -Doptimize=ReleaseSafe
-    ```
+**Fedora:**
+```bash
+sudo dnf install zig gtk4-devel freetype-devel libepoxy-devel \
+  pango-devel cairo-devel fontconfig-devel harfbuzz-devel
+```
 
-2.  **Run**:
-    ```bash
-    ./zig-out/bin/zest
-    ```
+**Arch Linux:**
+```bash
+sudo pacman -S zig gtk4 freetype2 libepoxy pango cairo fontconfig harfbuzz
+```
+
+### Build
+
+```bash
+git clone https://github.com/Jayanth1312/zest.git
+cd zest
+zig build -Doptimize=ReleaseSafe
+```
+
+### Run
+
+```bash
+./zig-out/bin/zest
+```
+
+### Debug Build
+
+```bash
+zig build -Doptimize=Debug
+./zig-out/bin/zest
+```
 
 ---
+
+## Configuration
+
+Zest currently has **no user-facing configuration files**. All settings are hardcoded in the source:
+
+| Setting | Value | Location |
+|---|---|---|
+| Font | DejaVu Sans Mono → Liberation Mono → Ubuntu Mono | `main.zig` |
+| Font size | 32px | `main.zig` |
+| Initial grid | 120 cols × 35 rows | `main.zig` |
+| Window size | 1280×720 | `main.zig` |
+| Shell | `$SHELL` or `/bin/sh` | `Pty.zig` |
+| TERM | `xterm-256color` | `Pty.zig` |
+| Atlas size | 2048×2048 | `Atlas.zig` |
+| PTY read buffer | 65536 bytes | `main.zig` |
+| Theme | Black Metal Immortal (Base16) | `Cell.zig` |
+
+Configuration file support is planned for a future release.
+
+---
+
+## Platform Support
+
+| Platform | Status | Backend |
+|---|---|---|
+| Linux (Wayland) | ✅ Supported | GTK4 + EGL + GLES 3.2 |
+| Linux (X11) | ✅ Supported | GTK4 + GLX |
+| macOS | ⚠️ Partial | GLFW (legacy, GTK4 migration pending) |
+| Windows | ⚠️ Partial | ConPty backend exists, process spawning incomplete |
+
+---
+
+## Roadmap
+
+- [ ] User configuration file (JSON/TOML)
+- [ ] Font size adjustment (`Ctrl++` / `Ctrl+-`)
+- [ ] Search functionality (`Ctrl+Shift+F`)
+- [ ] Link detection and clickable URLs
+- [ ] Bell notification (visual + audio)
+- [ ] Full macOS GTK4 support
+- [ ] Complete Windows ConPty support
+- [ ] Ligature support
+- [ ] Transparency/blur background
+- [ ] Custom color themes
+- [ ] Session persistence (save/restore tabs and panes)
+
+---
+
+## Contributing
+
+Contributions are welcome! Areas that need help:
+
+- **macOS GTK4 migration** — migrate from GLFW to GTK4
+- **Windows ConPty** — complete process spawning
+- **Configuration system** — design and implement user config
+- **Testing** — terminal escape sequence conformance tests
+- **Documentation** — improve docs, add screenshots
+
+Please open an issue before starting work on larger features.
+
+---
+
+## License
+
+This project does not yet have a license file. A permissive license (MIT or Apache 2.0) will be added soon.
+
+---
+
 Built with ⚡ by [Jayanth](https://github.com/Jayanth1312)

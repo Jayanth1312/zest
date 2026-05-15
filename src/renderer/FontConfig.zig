@@ -2,12 +2,22 @@
 const std = @import("std");
 const fc = @import("c_fc");
 
+var cached_config: ?*fc.FcConfig = null;
+
 pub fn init() bool {
     return fc.FcInit() == fc.FcTrue;
 }
 
 pub fn deinit() void {
     fc.FcFini();
+    cached_config = null;
+}
+
+fn getConfig() ?*fc.FcConfig {
+    if (cached_config == null) {
+        cached_config = fc.FcInitLoadConfigAndFonts();
+    }
+    return cached_config;
 }
 
 pub fn findMonospaceFont(allocator: std.mem.Allocator) !?[]const u8 {
@@ -18,8 +28,7 @@ pub fn findMonospaceFont(allocator: std.mem.Allocator) !?[]const u8 {
     _ = fc.FcPatternAddString(pat, "spacing", "mono");
     _ = fc.FcPatternAddBool(pat, "scalable", fc.FcTrue);
 
-    const config = fc.FcInitLoadConfigAndFonts();
-    if (config == null) return null;
+    const config = getConfig() orelse return null;
 
     var result: fc.FcResult = undefined;
     const sorted = fc.FcFontSort(config, pat, fc.FcTrue, null, &result);
@@ -48,15 +57,14 @@ pub fn findEmojiFont(allocator: std.mem.Allocator) !?[]const u8 {
         "Noto Emoji",
     };
 
+    const config = getConfig() orelse return null;
+
     for (families) |family| {
         const pat = fc.FcPatternCreate();
         if (pat == null) continue;
         defer fc.FcPatternDestroy(pat);
 
         _ = fc.FcPatternAddString(pat, "family", family);
-
-        const config = fc.FcInitLoadConfigAndFonts();
-        if (config == null) continue;
 
         var result: fc.FcResult = undefined;
         const sorted = fc.FcFontSort(config, pat, fc.FcTrue, null, &result);

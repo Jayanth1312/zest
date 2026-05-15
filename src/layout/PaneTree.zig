@@ -183,6 +183,58 @@ pub const PaneTree = struct {
         return result;
     }
 
+    pub fn splitPane(self: *PaneTree, target: *Pane, direction: Direction, ratio: f32) !*Pane {
+        const new_pane_id = self.nextId();
+        const new_pane = try self.allocator.create(Pane);
+        errdefer self.allocator.destroy(new_pane);
+        const init_cols = if (target.cols > 0) target.cols else 80;
+        const init_rows = if (target.rows > 0) target.rows else 24;
+        new_pane.* = try Pane.init(self.allocator, new_pane_id, init_cols, init_rows);
+        new_pane.focused = false;
+        target.focused = true;
+
+        const split_node = try self.allocator.create(SplitNode);
+        errdefer self.allocator.destroy(split_node);
+
+        const first_child = Node.initLeaf(target);
+        const second_child = Node.initLeaf(new_pane);
+
+        split_node.* = SplitNode{
+            .direction = direction,
+            .ratio = ratio,
+            .first = first_child,
+            .second = second_child,
+        };
+
+        // Find and replace the target node in the tree
+        try self.replacePaneInTree(&self.root, target, .{
+            .tag = .split,
+            .split = split_node,
+        });
+
+        return new_pane;
+    }
+
+    fn replacePaneInTree(self: *PaneTree, node: *Node, target: *Pane, replacement: Node) !void {
+        switch (node.tag) {
+            .leaf => {
+                if (node.pane) |p| {
+                    if (p == target) {
+                        node.* = replacement;
+                        return;
+                    }
+                }
+            },
+            .split => {
+                if (node.split) |s| {
+                    try self.replacePaneInTree(&s.first, target, replacement);
+                    if (node.tag == .leaf) return;
+                    try self.replacePaneInTree(&s.second, target, replacement);
+                }
+            },
+        }
+    }
+
     fn splitNodeAtPath(self: *PaneTree, node: *Node, target: *Pane, direction: Direction, ratio: f32) !bool {
         switch (node.tag) {
             .leaf => {
@@ -235,6 +287,11 @@ pub const PaneTree = struct {
         return try self.closeNodeAtPath(&self.root, focused);
     }
 
+    pub fn closePane(self: *PaneTree, target: *Pane) !bool {
+        if (self.root.tag == .leaf) return false;
+        return try self.closeNodeAtPath(&self.root, target);
+    }
+
     fn closeNodeAtPath(self: *PaneTree, node: *Node, target: *Pane) !bool {
         if (node.tag != .split) return false;
         const s = node.split orelse return false;
@@ -244,7 +301,7 @@ pub const PaneTree = struct {
                 if (fp == target) {
                     const survivor = s.second;
                     setFocusOnFirst(&s.second);
-                    target.deinit();
+                    target.deinit(self.allocator);
                     self.allocator.destroy(target);
                     self.allocator.destroy(s);
                     node.* = survivor;
@@ -258,7 +315,7 @@ pub const PaneTree = struct {
                 if (scp == target) {
                     const survivor = s.first;
                     setFocusOnFirst(&s.first);
-                    target.deinit();
+                    target.deinit(self.allocator);
                     self.allocator.destroy(target);
                     self.allocator.destroy(s);
                     node.* = survivor;

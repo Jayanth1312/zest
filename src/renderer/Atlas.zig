@@ -6,12 +6,15 @@ const c = bindings.c;
 const ft_c = bindings.ft;
 const Font = @import("Font.zig");
 
+const MAX_CELL_BUF = 4096 * 4;
+
 pub const Atlas = struct {
     texture_id: c.GLuint,
     width: u32,
     height: u32,
     cursor_x: u32,
     cursor_y: u32,
+    cell_buf: [MAX_CELL_BUF]u8 = undefined,
 
     pub fn init() !Atlas {
         const width = 2048;
@@ -118,9 +121,8 @@ pub const Atlas = struct {
         }
 
         const buf_size = slot_width * slot_height * 4;
-        const cell_buf = try std.heap.page_allocator.alloc(u8, buf_size);
-        defer std.heap.page_allocator.free(cell_buf);
-        @memset(cell_buf, 0);
+        if (buf_size > MAX_CELL_BUF) return error.GlyphTooLarge;
+        @memset(self.cell_buf[0..buf_size], 0);
 
         if (bmp.width > 0 and bmp.rows > 0 and bmp.buffer != null) {
             const src_bpp: u32 = switch (pixel_mode) {
@@ -163,17 +165,17 @@ pub const Atlas = struct {
 
                         switch (pixel_mode) {
                             ft_c.FT_PIXEL_MODE_BGRA => {
-                                cell_buf[dst_idx + 0] = bmp.buffer[src_idx + 2];
-                                cell_buf[dst_idx + 1] = bmp.buffer[src_idx + 1];
-                                cell_buf[dst_idx + 2] = bmp.buffer[src_idx + 0];
-                                cell_buf[dst_idx + 3] = bmp.buffer[src_idx + 3];
+                                self.cell_buf[dst_idx + 0] = bmp.buffer[src_idx + 2];
+                                self.cell_buf[dst_idx + 1] = bmp.buffer[src_idx + 1];
+                                self.cell_buf[dst_idx + 2] = bmp.buffer[src_idx + 0];
+                                self.cell_buf[dst_idx + 3] = bmp.buffer[src_idx + 3];
                             },
                             else => {
                                 const val = bmp.buffer[src_idx];
-                                cell_buf[dst_idx + 0] = val;
-                                cell_buf[dst_idx + 1] = val;
-                                cell_buf[dst_idx + 2] = val;
-                                cell_buf[dst_idx + 3] = val;
+                                self.cell_buf[dst_idx + 0] = val;
+                                self.cell_buf[dst_idx + 1] = val;
+                                self.cell_buf[dst_idx + 2] = val;
+                                self.cell_buf[dst_idx + 3] = val;
                             },
                         }
                     }
@@ -213,10 +215,10 @@ pub const Atlas = struct {
                                 mask = bmp.buffer[src_idx];
                             },
                         }
-                        cell_buf[dst_idx + 0] = mask;
-                        cell_buf[dst_idx + 1] = mask;
-                        cell_buf[dst_idx + 2] = mask;
-                        cell_buf[dst_idx + 3] = 255;
+                        self.cell_buf[dst_idx + 0] = mask;
+                        self.cell_buf[dst_idx + 1] = mask;
+                        self.cell_buf[dst_idx + 2] = mask;
+                        self.cell_buf[dst_idx + 3] = 255;
                     }
                 }
             }
@@ -235,7 +237,7 @@ pub const Atlas = struct {
             @intCast(slot_height),
             c.GL_RGBA,
             c.GL_UNSIGNED_BYTE,
-            cell_buf.ptr,
+            &self.cell_buf,
         );
 
         const advance: u32 = if (is_emoji) slot_width else @intCast(g.*.advance.x >> 6);
@@ -271,9 +273,8 @@ pub const Atlas = struct {
         }
 
         const buf_size = width * height * 4;
-        var buf = try std.heap.page_allocator.alloc(u8, buf_size);
-        defer std.heap.page_allocator.free(buf);
-        @memset(buf, 0);
+        if (buf_size > MAX_CELL_BUF) return error.GlyphTooLarge;
+        @memset(self.cell_buf[0..buf_size], 0);
 
         const mid_w = width / 2;
         const mid_h = height / 2;
@@ -282,74 +283,74 @@ pub const Atlas = struct {
             0x2580 => {
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2584 => {
                 var y: u32 = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2588 => {
-                @memset(buf, 255);
+                @memset(self.cell_buf[0..buf_size], 255);
             },
             0x258C => {
                 var y: u32 = 0;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
                 }
             },
             0x2590 => {
                 var y: u32 = 0;
                 while (y < height) : (y += 1) {
-                    @memset(buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2596 => {
                 var y = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
                 }
             },
             0x2597 => {
                 var y = mid_h;
                 while (y < height) : (y += 1) {
-                    @memset(buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2598 => {
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y * width + mid_w) * 4], 255);
                 }
             },
             0x259D => {
                 var y: u32 = 0;
                 while (y < mid_h) : (y += 1) {
-                    @memset(buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[(y * width + mid_w) * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2582 => {
                 var y: u32 = height - (height / 4);
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2586 => {
                 var y: u32 = height / 4;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             0x2587 => {
                 var y: u32 = height / 8;
                 while (y < height) : (y += 1) {
-                    @memset(buf[y * width * 4 .. (y + 1) * width * 4], 255);
+                    @memset(self.cell_buf[y * width * 4 .. (y + 1) * width * 4], 255);
                 }
             },
             else => {
-                @memset(buf, 255);
+                @memset(self.cell_buf[0..buf_size], 255);
             },
         }
 
@@ -366,7 +367,7 @@ pub const Atlas = struct {
             @intCast(height),
             c.GL_RGBA,
             c.GL_UNSIGNED_BYTE,
-            buf.ptr,
+            self.cell_buf[0..buf_size].ptr,
         );
 
         const glyph_info = Font.GlyphInfo{

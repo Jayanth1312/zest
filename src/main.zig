@@ -47,10 +47,17 @@ extern fn g_application_run(app: *GtkApplication, argc: c_int, argv: ?*[*:0]u8) 
 extern fn gtk_application_window_new(app: *GtkApplication) *GtkWindow;
 extern fn gtk_window_set_title(win: *GtkWindow, title: [*:0]const u8) void;
 extern fn gtk_window_set_default_size(win: *GtkWindow, w: c_int, h: c_int) void;
-extern fn gtk_widget_get_width(widget: *GtkWidget) c_int;
-extern fn gtk_widget_get_height(widget: *GtkWidget) c_int;
+extern fn gtk_window_set_decorated(win: *GtkWindow, decorated: c_int) void;
+extern fn gtk_window_set_titlebar(win: *GtkWindow, titlebar: *GtkWidget) void;
 extern fn gtk_window_set_child(win: *GtkWindow, child: *GtkWidget) void;
 extern fn gtk_window_present(win: *GtkWindow) void;
+extern fn gtk_window_close(win: *GtkWindow) void;
+extern fn gtk_window_minimize(win: *GtkWindow) void;
+extern fn gtk_window_maximize(win: *GtkWindow) void;
+extern fn gtk_window_unmaximize(win: *GtkWindow) void;
+extern fn gtk_window_is_maximized(win: *GtkWindow) c_int;
+extern fn gtk_widget_get_width(widget: *GtkWidget) c_int;
+extern fn gtk_widget_get_height(widget: *GtkWidget) c_int;
 extern fn gtk_gl_area_new() *GtkGLArea;
 extern fn gtk_gl_area_set_auto_render(area: *GtkGLArea, auto_render: c_int) void;
 extern fn gtk_gl_area_set_has_stencil_buffer(area: *GtkGLArea, has: c_int) void;
@@ -100,6 +107,7 @@ extern fn gtk_widget_set_margin_top(widget: *GtkWidget, margin: c_int) void;
 extern fn gtk_widget_set_margin_start(widget: *GtkWidget, margin: c_int) void;
 
 // Button
+extern fn gtk_button_new() *GtkWidget;
 extern fn gtk_button_new_with_label(label: [*:0]const u8) *GtkWidget;
 extern fn gtk_button_set_label(button: *GtkWidget, label: [*:0]const u8) void;
 extern fn gtk_widget_add_css_class(widget: *GtkWidget, css_class: [*:0]const u8) void;
@@ -169,6 +177,23 @@ const THEME_ACCENT = "#5f8787";
 
 const TAB_CSS =
     \\box.tab-bar { background-color: #0d0d0d; padding: 0; min-height: 28px; }
+    \\box.window-controls { padding: 0 8px; }
+    \\button.window-btn-close, button.window-btn-minimize, button.window-btn-maximize {
+    \\    background-color: transparent;
+    \\    border: none;
+    \\    border-radius: 50%;
+    \\    min-width: 12px;
+    \\    min-height: 12px;
+    \\    padding: 0;
+    \\    margin: 0 3px;
+    \\    box-shadow: none;
+    \\}
+    \\button.window-btn-close { background-color: #ff5f56; }
+    \\button.window-btn-minimize { background-color: #ffbd2e; }
+    \\button.window-btn-maximize { background-color: #27c93f; }
+    \\button.window-btn-close:hover { background-color: #ff3f34; }
+    \\button.window-btn-minimize:hover { background-color: #ff9f1a; }
+    \\button.window-btn-maximize:hover { background-color: #1a9c33; }
     \\box.tab-container { background-color: #0d0d0d; }
     \\scrolledwindow.tab-scroll { background-color: #0d0d0d; border: none; }
     \\scrolledwindow.tab-scroll undershoot, scrolledwindow.tab-scroll overshoot { border: none; box-shadow: none; }
@@ -179,30 +204,30 @@ const TAB_CSS =
     \\    background-image: linear-gradient(to right, rgba(95, 135, 135, 0) 0%, rgba(95, 135, 135, 1) 30%);
     \\    padding: 0 6px 0 32px;
     \\}
-\\label.clock-label { 
-    \\    color: #000000; 
-    \\    background-color: transparent; /* Changed from solid */
-    \\    font-size: 14px; 
-    \\    font-weight: 700; 
-    \\    font-family: monospace; 
-    \\    padding: 2px 10px;
-    \\    border-radius: 2px; 
-    \\}
-    \\button.history-button { 
+    \\label.clock-label {
+    \\    color: #000000;
     \\    background-color: transparent;
-    \\    color: #000000; 
-    \\    border: none; 
-    \\    border-radius: 0; 
-    \\    padding: 2px 8px; 
-    \\    font-size: 16px;
-    \\    font-weight: 700; 
-    \\    min-height: 28px; 
+    \\    font-size: 14px;
+    \\    font-weight: 700;
+    \\    font-family: monospace;
+    \\    padding: 2px 10px;
+    \\    border-radius: 2px;
     \\}
-    \\button.history-button:hover { 
+    \\button.history-button {
+    \\    background-color: transparent;
+    \\    color: #000000;
+    \\    border: none;
+    \\    border-radius: 0;
+    \\    padding: 2px 8px;
+    \\    font-size: 16px;
+    \\    font-weight: 700;
+    \\    min-height: 28px;
+    \\}
+    \\button.history-button:hover {
     \\    background-color: rgba(0, 0, 0, 0.15);
     \\    color: #000000;
     \\}
-    \\button.history-button.active { 
+    \\button.history-button.active {
     \\    background-color: rgba(95, 135, 135, 0.3);
     \\    color: #000000;
     \\}
@@ -301,9 +326,9 @@ var g_tabs: std.ArrayListUnmanaged(Tab) = .empty;
 var g_active_tab: usize = 0;
 var g_clock_label: ?*GtkWidget = null;
 var g_history_button: ?*GtkWidget = null;
-var g_tab_bar: ?*GtkWidget = null; // outer box: [tab_container] [right_section]
-var g_tab_container: ?*GtkWidget = null; // box holding just tab buttons
-var g_right_section: ?*GtkWidget = null; // right section: [clock]
+var g_tab_bar: ?*GtkWidget = null;
+var g_tab_container: ?*GtkWidget = null;
+var g_right_section: ?*GtkWidget = null;
 var g_main_box: ?*GtkWidget = null;
 var g_overlay: ?*GtkWidget = null;
 var g_tab_counter: u32 = 0;
@@ -858,21 +883,21 @@ fn key_pressed_cb(_: ?*GtkEventControllerKey, keyval: c_uint, keycode: c_uint, s
                 queueRender();
                 return 1;
             }
-            if (keyval == 0x08) {
+            if (keyval == 0xff08) {
                 tab.historyDeleteSearchChar();
                 queueRender();
                 return 1;
             }
         }
 
-        if (keyval == GtkKey.GDK_KEY_Page_Up) {
+        if (keyval == 0xff55) {
             if (tab.history_scroll > 0) {
                 tab.history_scroll -= 1;
                 queueRender();
             }
             return 1;
         }
-        if (keyval == GtkKey.GDK_KEY_Page_Down) {
+        if (keyval == 0xff56) {
             tab.history_scroll += 1;
             queueRender();
             return 1;
@@ -1390,6 +1415,28 @@ fn window_destroy_cb(_: ?*GtkWindow, _: ?*anyopaque) callconv(.c) void {
     shutdown();
 }
 
+fn close_window_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    if (g_window) |win| {
+        gtk_window_close(win);
+    }
+}
+
+fn minimize_window_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    if (g_window) |win| {
+        gtk_window_minimize(win);
+    }
+}
+
+fn maximize_window_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    if (g_window) |win| {
+        if (gtk_window_is_maximized(win) != 0) {
+            gtk_window_unmaximize(win);
+        } else {
+            gtk_window_maximize(win);
+        }
+    }
+}
+
 fn shutdown() void {
     g_initialized = false;
     for (g_tabs.items) |*tab| {
@@ -1453,7 +1500,7 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     // Add overlay to main box
     gtk_box_append(@ptrCast(g_main_box.?), @ptrCast(g_overlay.?));
 
-    // Create tab bar: [tab_container] [+] [clock]
+    // Create tab bar: [tab_container] [+] [history] [clock]
     g_tab_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(@ptrCast(g_tab_bar.?), "tab-bar");
     gtk_box_append(@ptrCast(g_main_box.?), @ptrCast(g_tab_bar.?));

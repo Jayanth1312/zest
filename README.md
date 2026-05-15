@@ -3,6 +3,10 @@
 **Zest** is a GPU-accelerated terminal emulator written in [Zig](https://ziglang.org/). It is engineered for extreme performance, low latency, and a premium "Black Metal Immortal" aesthetic.
 
 <p align="center">
+  <img src="pictures/zest.png" alt="Zest Terminal Screenshot">
+</p>
+
+<p align="center">
   <img src="assets/icon.png" width="120" alt="Zest icon">
 </p>
 
@@ -181,7 +185,7 @@ zest/
 │       └── RingBuffer.zig        # Circular byte buffer (defined, unused)
 ── assets/                       # Icons (PNG, ICO, ICNS)
 ├── build.zig                     # Zig build script
-├── build.zig.zon                 # Package manifest (v0.1.1)
+├── build.zig.zon                 # Package manifest (v0.5.0)
 └── README.md                     # This file
 ```
 

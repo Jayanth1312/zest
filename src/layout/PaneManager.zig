@@ -9,8 +9,6 @@ const Font = @import("../renderer/Font.zig");
 const FileExplorer = @import("../fileexplorer/FileExplorer.zig");
 const SearchMode = @import("../fileexplorer/FileExplorer.zig").SearchMode;
 
-pub const Alignment = enum { top, center, bottom };
-
 pub const PaneManager = struct {
     tree: PaneTree,
     allocator: std.mem.Allocator,
@@ -21,8 +19,6 @@ pub const PaneManager = struct {
     padding_y: f32 = 8.0,
     border_size: f32 = 1.5,
     inner_padding: f32 = 4.0,
-    alignment: Alignment = .top,
-    input_bar_rows: u32 = 0,
     pane_cache: std.ArrayListUnmanaged(*Pane) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, font: *Font.Font, initial_cols: u32, initial_rows: u32) !PaneManager {
@@ -69,11 +65,9 @@ pub const PaneManager = struct {
         const cell_w: f32 = @floatFromInt(self.font.cell_width);
         const cell_h: f32 = @floatFromInt(self.font.cell_height);
 
-        const input_bar_height: f32 = @as(f32, @floatFromInt(self.input_bar_rows)) * cell_h;
-
         for (self.pane_cache.items) |p| {
             const inner_w = p.width - (self.inner_padding * 2.0);
-            const inner_h = p.height - (self.inner_padding * 2.0) - input_bar_height;
+            const inner_h = p.height - (self.inner_padding * 2.0);
             const new_cols = @max(1, @as(u32, @intFromFloat(@max(0.0, inner_w) / cell_w)));
             const new_rows = @max(1, @as(u32, @intFromFloat(@max(0.0, inner_h) / cell_h)));
             if (new_cols != p.cols or new_rows != p.rows) {
@@ -292,40 +286,6 @@ pub const PaneManager = struct {
 
     pub fn tick(self: *PaneManager, _: f64) void {
         _ = self;
-    }
-
-    pub fn computeVerticalOffset(self: *PaneManager, pane: *Pane) f32 {
-        if (pane.terminal.using_alt_screen) {
-            return pane.y + self.inner_padding;
-        }
-
-        const cell_h: f32 = @floatFromInt(self.font.cell_height);
-        const input_bar_height: f32 = @as(f32, @floatFromInt(self.input_bar_rows)) * cell_h;
-        const avail_h = pane.height - (self.inner_padding * 2.0) - input_bar_height;
-        
-        const last_used = pane.terminal.grid.getLastUsedRow();
-        const active_row = @max(pane.terminal.cursor_row, last_used);
-        
-        const content_h = @as(f32, @floatFromInt(active_row + 1)) * cell_h;
-        
-        if (content_h < avail_h) {
-            return pane.y + self.inner_padding + (avail_h - content_h);
-        }
-        
-        return pane.y + self.inner_padding;
-    }
-
-    pub fn getInputBarRect(self: *PaneManager, pane: *Pane) struct { x: f32, y: f32, width: f32, height: f32 } {
-        const cell_h: f32 = @floatFromInt(self.font.cell_height);
-        const input_bar_height: f32 = @as(f32, @floatFromInt(self.input_bar_rows)) * cell_h;
-        const inner_w = pane.width - (self.inner_padding * 2.0);
-
-        return .{
-            .x = pane.x + self.inner_padding,
-            .y = pane.y + pane.height - self.inner_padding - input_bar_height,
-            .width = inner_w,
-            .height = input_bar_height,
-        };
     }
 
     pub fn isExplorerActive(self: *PaneManager) bool {

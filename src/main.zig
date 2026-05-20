@@ -5,12 +5,18 @@ const c = bindings.c;
 const Font = @import("renderer/Font.zig");
 const FontConfig = @import("renderer/FontConfig.zig");
 const Renderer = @import("renderer/Renderer.zig");
+const Grid = @import("terminal/Grid.zig").Grid;
 const Terminal = @import("terminal/Terminal.zig");
 const PaneManager = @import("layout/PaneManager.zig").PaneManager;
 const Pane = @import("layout/Pane.zig").Pane;
 const KeyBindings = @import("layout/KeyBindings.zig").KeyBindings;
 const GtkKey = @import("apprt/gtk/key.zig");
 const FileExplorer = @import("fileexplorer/FileExplorer.zig").FileExplorer;
+const Config = @import("config/Config.zig").Config;
+const SettingsUI = @import("settings/SettingsUI.zig");
+const ThemePreviewUI = @import("settings/ThemePreviewUI.zig");
+const ConfigWriter = @import("config/ConfigWriter.zig");
+const ConfigParser = @import("config/ConfigParser.zig");
 
 const INITIAL_COLS: u32 = 120;
 const INITIAL_ROWS: u32 = 35;
@@ -207,11 +213,12 @@ const TAB_CSS =
     \\label.clock-label {
     \\    color: #000000;
     \\    background-color: transparent;
-    \\    font-size: 14px;
+    \\    font-size: 15px;
     \\    font-weight: 700;
     \\    font-family: monospace;
-    \\    padding: 2px 10px;
+    \\    padding: 2px 14px;
     \\    border-radius: 2px;
+    \\    letter-spacing: 1px;
     \\}
     \\button.history-button {
     \\    background-color: transparent;
@@ -229,6 +236,35 @@ const TAB_CSS =
     \\}
     \\button.history-button.active {
     \\    background-color: rgba(95, 135, 135, 0.3);
+    \\    color: #000000;
+    \\}
+    \\button.zoom-label {
+    \\    background-color: transparent;
+    \\    color: #000000;
+    \\    border: none;
+    \\    border-radius: 0;
+    \\    padding: 2px 6px;
+    \\    font-size: 12px;
+    \\    font-weight: 700;
+    \\    font-family: monospace;
+    \\    min-height: 28px;
+    \\}
+    \\button.zoom-label:hover {
+    \\    background-color: rgba(0, 0, 0, 0.15);
+    \\    color: #000000;
+    \\}
+    \\button.gear-button {
+    \\    background-color: transparent;
+    \\    color: #000000;
+    \\    border: none;
+    \\    border-radius: 0;
+    \\    padding: 2px 8px;
+    \\    font-size: 16px;
+    \\    min-height: 28px;
+    \\    min-width: 28px;
+    \\}
+    \\button.gear-button:hover {
+    \\    background-color: rgba(0, 0, 0, 0.15);
     \\    color: #000000;
     \\}
 ;
@@ -303,6 +339,7 @@ const Tab = struct {
     }
 };
 
+var g_config: ?Config = null;
 var g_pane_manager: ?*PaneManager = null;
 var g_key_bindings: KeyBindings = KeyBindings{};
 var g_font: ?*Font.Font = null;
@@ -326,6 +363,20 @@ var g_tabs: std.ArrayListUnmanaged(Tab) = .empty;
 var g_active_tab: usize = 0;
 var g_clock_label: ?*GtkWidget = null;
 var g_history_button: ?*GtkWidget = null;
+var g_zoom_label: ?*GtkWidget = null;
+var g_gear_button: ?*GtkWidget = null;
+var g_font_pixel_size: u32 = 32;
+fn getDefaultFontSize() u32 {
+    return if (g_config) |cfg| cfg.settings.font_size else 32;
+}
+
+fn getZoomLevel() u32 {
+    return if (g_config) |cfg| cfg.settings.zoom_level else 100;
+}
+
+fn getActualFontSize() u32 {
+    return @max(8, @min(96, getDefaultFontSize() * getZoomLevel() / 100));
+}
 var g_tab_bar: ?*GtkWidget = null;
 var g_tab_container: ?*GtkWidget = null;
 var g_right_section: ?*GtkWidget = null;
@@ -354,6 +405,37 @@ fn updateSizes() void {
 
 fn queueRender() void {
     if (g_gl_area) |area| gtk_gl_area_queue_render(area);
+}
+
+fn updateZoomLabel() void {
+    if (g_zoom_label) |label| {
+        const zoom = getZoomLevel();
+        var buf: [16:0]u8 = undefined;
+        const len = std.fmt.bufPrint(&buf, "{d}%", .{zoom}) catch return;
+        buf[len.len] = 0;
+        gtk_button_set_label(@ptrCast(label), &buf);
+    }
+}
+
+fn changeZoomLevel(delta: i32) void {
+    if (g_font == null or g_renderer == null) return;
+    if (g_config) |*cfg| {
+        const step: i32 = @intCast(cfg.settings.zoom_step);
+        const new_zoom = @max(50, @min(300, @as(i32, @intCast(cfg.settings.zoom_level)) + delta * step));
+        if (new_zoom == @as(i32, @intCast(cfg.settings.zoom_level))) return;
+        cfg.settings.zoom_level = @intCast(new_zoom);
+    }
+    g_font_pixel_size = getActualFontSize();
+    g_font.?.setPixelSize(g_font_pixel_size) catch return;
+    if (g_renderer.?.fallback_font) |emoji| {
+        emoji.setPixelSize(g_font_pixel_size) catch {};
+    }
+    g_renderer.?.reloadFont() catch return;
+    for (g_tabs.items) |*tab| {
+        tab.pane_manager.handleResize(g_fb_width, g_fb_height) catch {};
+    }
+    updateZoomLabel();
+    queueRender();
 }
 
 fn getTabCwd(tab: *Tab) ?[:0]const u8 {
@@ -404,7 +486,9 @@ fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
         _ = FontConfig.init();
     }
 
-    const font_pixel_size: u32 = 32;
+    if (g_initialized) return;
+    g_font_pixel_size = getActualFontSize();
+    updateZoomLabel();
 
     const font_paths = [_][*:0]const u8{
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
@@ -415,7 +499,7 @@ fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
     };
     var font: ?Font.Font = null;
     for (&font_paths) |path| {
-        font = Font.Font.init(std.heap.page_allocator, path, font_pixel_size) catch continue;
+        font = Font.Font.init(std.heap.page_allocator, path, g_font_pixel_size) catch continue;
         std.debug.print("zest: using font: {s}\n", .{path});
         break;
     }
@@ -432,7 +516,7 @@ fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
     if (emoji_path) |path| {
         defer std.heap.page_allocator.free(path);
         std.debug.print("zest: using emoji font: {s}\n", .{path});
-        emoji_font = Font.Font.init(std.heap.page_allocator, @ptrCast(path), font_pixel_size) catch null;
+        emoji_font = Font.Font.init(std.heap.page_allocator, @ptrCast(path), g_font_pixel_size) catch null;
     }
 
     if (emoji_font == null) {
@@ -456,7 +540,8 @@ fn gl_realize_cb(_: ?*GtkGLArea, _: ?*anyopaque) callconv(.c) void {
     // Create the first tab
     createTab();
 
-    _ = g_timeout_add(16, ptyReadIdle, null);
+    const pty_ms = if (g_config) |cfg| cfg.settings.pty_read_interval_ms else 16;
+    _ = g_timeout_add(pty_ms, ptyReadIdle, null);
 }
 
 fn renderHistoryPanel(terminal: *Terminal.Terminal, history: *const std.ArrayListUnmanaged([]u8), pane_cols: u32, pane_rows: u32, tab: *Tab) void {
@@ -640,6 +725,8 @@ fn gl_render_cb(_: ?*GtkGLArea, _: ?*cairo_t, _: ?*anyopaque) callconv(.c) c_int
         gtk_gl_area_make_current(area);
     }
 
+    c.glViewport(0, 0, g_fb_width, g_fb_height);
+
     const bg_f = @import("terminal/Cell.zig").Color.default_bg.toFloats();
     c.glClearColor(bg_f[0], bg_f[1], bg_f[2], 1.0);
     c.glClear(c.GL_COLOR_BUFFER_BIT);
@@ -649,6 +736,7 @@ fn gl_render_cb(_: ?*GtkGLArea, _: ?*cairo_t, _: ?*anyopaque) callconv(.c) c_int
     const current_time = getTime();
     const panes_count = g_pane_list.items.len;
 
+    c.glEnable(c.GL_SCISSOR_TEST);
     for (g_pane_list.items) |pane| {
         if (pane.is_history_pane) {
             const cell_h: f32 = @floatFromInt(g_font.?.cell_height);
@@ -676,8 +764,14 @@ fn gl_render_cb(_: ?*GtkGLArea, _: ?*cairo_t, _: ?*anyopaque) callconv(.c) c_int
             }
         }
 
+        const sx: i32 = @intFromFloat(@round(pane.x));
+        const sy: i32 = g_fb_height - @as(i32, @intFromFloat(@round(pane.y + pane.height)));
+        const sw: i32 = @intFromFloat(@round(pane.width));
+        const sh: i32 = @intFromFloat(@round(pane.height));
+        c.glScissor(sx, sy, sw, sh);
+
         const offset_x = pane.x + g_pane_manager.?.inner_padding;
-        const offset_y = g_pane_manager.?.computeVerticalOffset(pane);
+        const offset_y = pane.y + g_pane_manager.?.inner_padding;
         g_renderer.?.render(
             &pane.terminal.grid,
             g_fb_width,
@@ -693,6 +787,7 @@ fn gl_render_cb(_: ?*GtkGLArea, _: ?*cairo_t, _: ?*anyopaque) callconv(.c) c_int
             pane.focused,
         );
     }
+    c.glDisable(c.GL_SCISSOR_TEST);
 
     if (panes_count > 1) {
         var split_lines = g_pane_manager.?.getSplitLines() catch return 1;
@@ -710,9 +805,8 @@ fn gl_render_cb(_: ?*GtkGLArea, _: ?*cairo_t, _: ?*anyopaque) callconv(.c) c_int
             c.glClear(c.GL_COLOR_BUFFER_BIT);
         }
         c.glDisable(c.GL_SCISSOR_TEST);
+        c.glClearColor(bg_f[0], bg_f[1], bg_f[2], 1.0);
     }
-
-    c.glViewport(0, 0, g_fb_width, g_fb_height);
 
     return 1;
 }
@@ -735,6 +829,54 @@ fn key_pressed_cb(_: ?*GtkEventControllerKey, keyval: c_uint, keycode: c_uint, s
     const ctrl = mods.ctrl;
     const shift = mods.shift;
     const alt = mods.alt;
+
+    // Ctrl+, to toggle settings panel
+    if (ctrl and !alt and keyval == 0x2C) {
+        toggleSettings();
+        queueRender();
+        return 1;
+    }
+
+    // Font zoom shortcuts — work even when settings is open
+    if (ctrl and !alt) {
+        if (keyval == 0x2D or keyval == 0x3D or keyval == 0x2B or keyval == 0xFFAB) {
+            if (SettingsUI.isOpen()) {
+                if (getFocusedGrid()) |grid| SettingsUI.close(grid);
+            }
+            if (keyval == 0x2D) {
+                changeZoomLevel(-1);
+            } else {
+                changeZoomLevel(1);
+            }
+            return 1;
+        }
+    }
+
+    if (getFocusedGrid()) |grid| {
+        if (ThemePreviewUI.isOpen()) {
+            if (ThemePreviewUI.handleKey(grid, &g_config.?.settings, keyval, ctrl)) {
+                if (!ThemePreviewUI.isOpen()) {
+                    applySettings();
+                }
+                queueRender();
+                return 1;
+            }
+        } else if (SettingsUI.isOpen()) {
+            if (SettingsUI.handleKey(grid, keyval, ctrl)) {
+                if (!SettingsUI.isOpen()) {
+                    if (SettingsUI.consumeThemePreviewRequest()) {
+                        if (g_config) |*cfg| {
+                            ThemePreviewUI.open(grid, &cfg.settings, grid.cols, grid.rows) catch {};
+                        }
+                    } else if (SettingsUI.isDirty()) {
+                        applySettings();
+                    }
+                }
+                queueRender();
+                return 1;
+            }
+        }
+    }
 
     if (g_pane_manager != null and g_pane_manager.?.isExplorerActive()) {
         const explorer_cmd = KeyBindings.handleExplorerKey(keyval, ctrl, shift, alt);
@@ -1107,7 +1249,7 @@ fn mouse_pressed_cb(gesture: ?*GtkGestureClick, _: c_int, x: f64, y: f64, _: ?*a
         p.focused = true;
 
         const offset_x = p.x + inner_pad;
-        const offset_y = g_pane_manager.?.computeVerticalOffset(p);
+        const offset_y = p.y + inner_pad;
         const col = @as(i32, @intFromFloat((fb_x - offset_x) / @as(f32, @floatFromInt(g_font.?.cell_width))));
         const row = @as(i32, @intFromFloat((fb_y - offset_y) / @as(f32, @floatFromInt(g_font.?.cell_height))));
         if (col >= 0 and col < p.cols and row >= 0 and row < p.rows) {
@@ -1150,7 +1292,7 @@ fn mouse_motion_cb(_: ?*GtkEventControllerMotion, x: f64, y: f64, _: ?*anyopaque
         const fb_x = @as(f32, @floatCast(x)) * g_scale_factor;
         const fb_y = @as(f32, @floatCast(y)) * g_scale_factor;
         const offset_x = p.x + inner_pad;
-        const offset_y = g_pane_manager.?.computeVerticalOffset(p);
+        const offset_y = p.y + inner_pad;
         const col = @as(i32, @intFromFloat((fb_x - offset_x) / @as(f32, @floatFromInt(g_font.?.cell_width))));
         const row = @as(i32, @intFromFloat((fb_y - offset_y) / @as(f32, @floatFromInt(g_font.?.cell_height))));
         const final_col = @as(u32, @intCast(std.math.clamp(col, 0, @as(i32, @intCast(p.cols - 1)))));
@@ -1283,6 +1425,128 @@ fn history_clicked_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
     }
 }
 
+fn toggleSettings() void {
+    const focused_grid = getFocusedGrid();
+    if (SettingsUI.isOpen()) {
+        if (focused_grid) |grid| SettingsUI.close(grid);
+        queueRender();
+        return;
+    }
+    const pane = g_pane_manager.?.getFocusedPane() orelse return;
+    const cell_h: f32 = @floatFromInt(g_font.?.cell_height);
+    const cell_w: f32 = @floatFromInt(g_font.?.cell_width);
+    const inner_h = pane.height - (g_pane_manager.?.inner_padding * 2.0);
+    const inner_w = pane.width - (g_pane_manager.?.inner_padding * 2.0);
+    const rows = @as(u32, @intFromFloat(inner_h / cell_h));
+    const cols = @as(u32, @intFromFloat(inner_w / cell_w));
+    if (cols < 10 or rows < 5) return;
+
+    const grid = &pane.terminal.grid;
+    const old_cols = grid.cols;
+    const old_rows = grid.rows;
+    const settings = if (g_config) |*cfg| &cfg.settings else return;
+    SettingsUI.open(grid, settings, @min(cols, old_cols), @min(rows, old_rows)) catch return;
+    queueRender();
+}
+
+fn gear_clicked_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    toggleSettings();
+    if (g_gl_widget) |widget| {
+        gtk_widget_grab_focus(widget);
+    }
+}
+
+fn applySettings() void {
+    if (g_config) |*cfg| {
+        cfg.settings = SettingsUI.getSettings().*;
+    }
+    // Save old colors before applying theme
+    const CellColor = @import("terminal/Cell.zig").Color;
+    const old_colors = [_]CellColor{
+        CellColor.default_bg, CellColor.default_fg,
+        CellColor.black, CellColor.red, CellColor.green, CellColor.yellow,
+        CellColor.blue, CellColor.magenta, CellColor.cyan, CellColor.white,
+        CellColor.bright_black, CellColor.bright_red, CellColor.bright_green, CellColor.bright_yellow,
+        CellColor.bright_blue, CellColor.bright_magenta, CellColor.bright_cyan, CellColor.bright_white,
+    };
+    // Apply theme
+    if (g_config) |*cfg| {
+        var new_cfg = Config.load(std.heap.page_allocator) catch return;
+        std.heap.page_allocator.free(cfg.css);
+        cfg.theme = new_cfg.theme;
+        cfg.css = new_cfg.css;
+        ConfigParser.deinitMap(&new_cfg.settings_map);
+        CellColor.applyTheme(&cfg.theme);
+        loadCss();
+    }
+    // Update cell colors in all terminals that match the old theme defaults
+    const new_colors = [_]CellColor{
+        CellColor.default_bg, CellColor.default_fg,
+        CellColor.black, CellColor.red, CellColor.green, CellColor.yellow,
+        CellColor.blue, CellColor.magenta, CellColor.cyan, CellColor.white,
+        CellColor.bright_black, CellColor.bright_red, CellColor.bright_green, CellColor.bright_yellow,
+        CellColor.bright_blue, CellColor.bright_magenta, CellColor.bright_cyan, CellColor.bright_white,
+    };
+    for (g_tabs.items) |*tab| {
+        var panes = tab.pane_manager.getVisiblePanes() catch continue;
+        defer panes.deinit(std.heap.page_allocator);
+        for (panes.items) |pane| {
+            const total = @as(usize, pane.terminal.grid.rows) * @as(usize, pane.terminal.grid.cols);
+            var i: usize = 0;
+            while (i < total) : (i += 1) {
+                const cell = &pane.terminal.grid.cells[i];
+                for (old_colors, 0..) |old_c, c_idx| {
+                    if (cell.bg.r == old_c.r and cell.bg.g == old_c.g and cell.bg.b == old_c.b) {
+                        cell.bg = new_colors[c_idx];
+                        break;
+                    }
+                }
+                for (old_colors, 0..) |old_c, c_idx| {
+                    if (cell.fg.r == old_c.r and cell.fg.g == old_c.g and cell.fg.b == old_c.b) {
+                        cell.fg = new_colors[c_idx];
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // Apply zoom level
+    g_font_pixel_size = getActualFontSize();
+    if (g_font) |f| {
+        f.setPixelSize(g_font_pixel_size) catch {};
+    }
+    if (g_renderer) |r| {
+        if (r.fallback_font) |emoji| {
+            emoji.setPixelSize(g_font_pixel_size) catch {};
+        }
+        r.reloadFont() catch {};
+    }
+    for (g_tabs.items) |*tab| {
+        tab.pane_manager.handleResize(g_fb_width, g_fb_height) catch {};
+    }
+    updateZoomLabel();
+    // Apply window size
+    if (g_config) |cfg| {
+        if (g_window) |win| {
+            gtk_window_set_default_size(win, cfg.settings.window_width, cfg.settings.window_height);
+        }
+    }
+    queueRender();
+}
+
+fn getFocusedGrid() ?*Grid {
+    const pane = g_pane_manager.?.getFocusedPane() orelse return null;
+    return &pane.terminal.grid;
+}
+
+fn zoom_reset_cb(_: ?*GtkWidget, _: ?*anyopaque) callconv(.c) void {
+    if (getZoomLevel() == 100) return;
+    changeZoomLevel(100 - @as(i32, @intCast(getZoomLevel())));
+    if (g_gl_widget) |widget| {
+        gtk_widget_grab_focus(widget);
+    }
+}
+
 fn switchToTab(idx: usize) void {
     if (idx >= g_tabs.items.len) return;
     g_active_tab = idx;
@@ -1307,10 +1571,19 @@ fn createTab() void {
     g_tab_counter += 1;
 
     const pm_ptr = std.heap.page_allocator.create(PaneManager) catch return;
-    pm_ptr.* = PaneManager.init(std.heap.page_allocator, g_font.?, INITIAL_COLS, INITIAL_ROWS) catch {
+    const init_cols = if (g_config) |cfg| cfg.settings.initial_cols else INITIAL_COLS;
+    const init_rows = if (g_config) |cfg| cfg.settings.initial_rows else INITIAL_ROWS;
+    pm_ptr.* = PaneManager.init(std.heap.page_allocator, g_font.?, init_cols, init_rows) catch {
         std.heap.page_allocator.destroy(pm_ptr);
         return;
     };
+
+    if (g_config) |cfg| {
+        pm_ptr.padding_x = cfg.settings.padding_x;
+        pm_ptr.padding_y = cfg.settings.padding_y;
+        pm_ptr.border_size = cfg.settings.border_size;
+        pm_ptr.inner_padding = cfg.settings.inner_padding;
+    }
 
     if (g_fb_width > 0 and g_fb_height > 0) {
         pm_ptr.handleResize(g_fb_width, g_fb_height) catch {};
@@ -1339,12 +1612,14 @@ fn createTab() void {
     // Enable truncation (...)
     gtk_label_set_ellipsize(label_widget, PANGO_ELLIPSIZE_END);
 
-    // THE FIX: Force the absolute minimum width to 1 character.
+    // Force the absolute minimum width to 1 character.
     // This gives GTK permission to squeeze the tabs instead of widening the window.
-    gtk_label_set_width_chars(label_widget, 1);
+    const min_chars = if (g_config) |cfg| cfg.settings.tab_min_width_chars else 1;
+    gtk_label_set_width_chars(label_widget, min_chars);
 
     // Limit the maximum width so long paths don't look ridiculous before squeezing
-    gtk_label_set_max_width_chars(label_widget, 30);
+    const max_chars = if (g_config) |cfg| cfg.settings.tab_max_width_chars else 30;
+    gtk_label_set_max_width_chars(label_widget, max_chars);
 
     const idx_ptr = std.heap.page_allocator.create(usize) catch return;
     idx_ptr.* = tab_idx;
@@ -1404,7 +1679,8 @@ fn closeActiveTab() void {
 
 fn loadCss() void {
     const provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_data(provider, TAB_CSS, -1);
+    const css_data = if (g_config) |*cfg| cfg.css else TAB_CSS;
+    gtk_css_provider_load_from_data(provider, css_data.ptr, -1);
     const display = gdk_display_get_default();
     if (display) |d| {
         gtk_style_context_add_provider_for_display(d, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -1468,7 +1744,9 @@ fn shutdown() void {
 fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     g_window = @ptrCast(gtk_application_window_new(g_app.?));
     gtk_window_set_title(g_window.?, "zest");
-    gtk_window_set_default_size(g_window.?, 1280, 720);
+    const win_w = if (g_config) |cfg| cfg.settings.window_width else 1280;
+    const win_h = if (g_config) |cfg| cfg.settings.window_height else 720;
+    gtk_window_set_default_size(g_window.?, win_w, win_h);
 
     _ = signalConnect(@ptrCast(g_window.?), "destroy", @ptrCast(@constCast(&window_destroy_cb)), null);
 
@@ -1490,6 +1768,7 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     gtk_gl_area_set_has_stencil_buffer(g_gl_area.?, 0);
     gtk_gl_area_set_has_depth_buffer(g_gl_area.?, 0);
     gtk_gl_area_set_use_es(g_gl_area.?, 0);
+    gtk_widget_add_css_class(@ptrCast(g_gl_area.?), "gl-area");
 
     _ = signalConnect(@ptrCast(g_gl_area.?), "realize", @ptrCast(@constCast(&gl_realize_cb)), null);
     _ = signalConnect(@ptrCast(g_gl_area.?), "render", @ptrCast(@constCast(&gl_render_cb)), null);
@@ -1524,16 +1803,28 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
 
     gtk_box_append(@ptrCast(g_tab_bar.?), tab_scroll);
 
-    // Right section: [history] [clock]
+    // Right section: [zoom] [history] [clock]
     g_right_section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(@ptrCast(g_right_section.?), "right-section");
     gtk_box_append(@ptrCast(g_tab_bar.?), @ptrCast(g_right_section.?));
+
+    // Zoom label (clickable button to reset)
+    g_zoom_label = gtk_button_new_with_label("100%");
+    gtk_widget_add_css_class(@ptrCast(g_zoom_label.?), "zoom-label");
+    _ = signalConnect(@ptrCast(g_zoom_label.?), "clicked", @ptrCast(@constCast(&zoom_reset_cb)), null);
+    gtk_box_append(@ptrCast(g_right_section.?), @ptrCast(g_zoom_label.?));
 
     // History button
     g_history_button = gtk_button_new_with_label("H");
     gtk_widget_add_css_class(@ptrCast(g_history_button.?), "history-button");
     _ = signalConnect(@ptrCast(g_history_button.?), "clicked", @ptrCast(@constCast(&history_clicked_cb)), null);
     gtk_box_append(@ptrCast(g_right_section.?), @ptrCast(g_history_button.?));
+
+    // Gear button (settings)
+    g_gear_button = gtk_button_new_with_label("\u{2699}");
+    gtk_widget_add_css_class(@ptrCast(g_gear_button.?), "gear-button");
+    _ = signalConnect(@ptrCast(g_gear_button.?), "clicked", @ptrCast(@constCast(&gear_clicked_cb)), null);
+    gtk_box_append(@ptrCast(g_right_section.?), @ptrCast(g_gear_button.?));
 
     // Clock label
     g_clock_label = gtk_label_new("00:00");
@@ -1572,11 +1863,17 @@ fn on_activate(_: ?*GtkApplication, _: ?*anyopaque) callconv(.c) void {
     updateSizes();
 
     // Start clock timer
-    _ = g_timeout_add(1000, clock_tick, null);
+    const clock_ms = if (g_config) |cfg| cfg.settings.clock_tick_interval_ms else 1000;
+    _ = g_timeout_add(clock_ms, clock_tick, null);
 }
 
 pub fn main() !void {
     g_last_input_time = getTime();
+
+    g_config = Config.load(std.heap.page_allocator) catch null;
+    if (g_config) |*cfg| {
+        @import("terminal/Cell.zig").Color.applyTheme(&cfg.theme);
+    }
 
     g_app = @ptrCast(gtk_application_new("com.zest.terminal", G_APPLICATION_FLAGS_NONE));
     if (g_app == null) return error.GtkInitFailed;

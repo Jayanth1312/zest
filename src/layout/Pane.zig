@@ -84,6 +84,10 @@ pub const Pane = struct {
         }
     }
 
+    pub fn resetTracking(self: *Pane) void {
+        self.cmd_len = 0;
+    }
+
     pub fn commitCommand(self: *Pane) void {
         if (self.cmd_len == 0) return;
         const cmd = self.terminal.allocator.dupe(u8, self.cmd_buf[0..self.cmd_len]) catch return;

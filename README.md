@@ -2,12 +2,10 @@
 
 **Zest** is a GPU-accelerated terminal emulator written in [Zig](https://ziglang.org/). It is engineered for extreme performance, low latency, and a premium "Black Metal Immortal" aesthetic.
 
-<p align="center">
-  <img src="pictures/zest.png" alt="Zest Terminal Screenshot">
-</p>
+## Gallery
 
 <p align="center">
-  <img src="assets/icon.png" width="120" alt="Zest icon">
+  <img src="pictures/zest.png" alt="Zest Terminal Screenshot">
 </p>
 
 ---
@@ -16,56 +14,21 @@
 
 Most terminal emulators render text on the CPU and push pixels to the GPU as a final step. Zest does the opposite: it renders text **directly on the GPU** using a custom OpenGL ES 3.2 pipeline. The result is buttery-smooth scrolling, instant text rendering, and a tiny memory footprint.
 
-| Aspect | Traditional Terminals | Zest |
-|---|---|---|
-| Text rendering | CPU (Pango/HarfBuzz → Cairo → surface) | GPU (FreeType → texture atlas → single-pass shader) |
-| Scroll performance | Re-layout + re-draw per frame | Row-index rotation + vertex buffer rebuild |
-| Emoji support | Font fallback chains, slow | Dedicated BGRA glyph slot in atlas |
-| Memory | Hundreds of MB | ~30-50 MB |
-| Binary size | 5-20 MB | ~12 MB |
+| Aspect             | Traditional Terminals                  | Zest                                                |
+| ------------------ | -------------------------------------- | --------------------------------------------------- |
+| Text rendering     | CPU (Pango/HarfBuzz → Cairo → surface) | GPU (FreeType → texture atlas → single-pass shader) |
+| Scroll performance | Re-layout + re-draw per frame          | Row-index rotation + vertex buffer rebuild          |
+| Emoji support      | Font fallback chains, slow             | Dedicated BGRA glyph slot in atlas                  |
+| Memory             | Hundreds of MB                         | ~30-50 MB                                           |
+| Binary size        | 5-20 MB                                | ~12 MB                                              |
 
 ---
 
 ## Architecture
 
-```
-─────────────────────────────────────────────────────────────┐
-│                        GTK4 Window                           │
-│  ┌───────────────────────────────────────────────────────  │
-│  │                    GtkGLArea                           │  │
-│  │  ─────────────────────────────────────────────────┐  │  │
-│  │  │              OpenGL ES 3.2 Renderer              │  │  │
-│  │  │  ──────────┐  ┌──────────┐  ┌───────────────┐  │  │  │
-│  │  │  │  Shader  │  │  Atlas   │  │  Vertex Buf   │  │  │  │
-│  │  │  │ Program  │  │ 2048×2048│  │  (pre-alloc)  │  │  │  │
-│  │  │  └──────────┘  └──────────┘  └───────────────┘  │  │  │
-│  │  ─────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │                    Tab Bar                             │  │
-│  │  [Tab] [Tab] [Tab] ... [+] [scrollable]  [ 19:05 ]    │  │
-│  ───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-         ▲                                              │
-         │  feed()                                      │ read()
-┌────────┴────────                          ┌──────────┴──────┐
-│   Terminal.zig  │◄─────────────────────────│    Pty.zig      │
-│  (VTE Parser)   │                          │  (forkpty)      │
-│  ANSI/CSI/OSC   │                          │  non-blocking   │
-└────────┬────────┘                          └──────────┬──────┘
-         │                                              │
-┌────────┴────────                          ┌──────────┴──────
-│    Grid.zig     │                          │   Shell Process │
-│  (row-index     │                          │  ($SHELL)       │
-│   indirection)  │                          │                 │
-────────┬────────┘                          └─────────────────┘
-         │
-────────┴────────┐
-│    Cell.zig     │
-│  (char+fg+bg    │
-│   +attrs)       │
-└─────────────────┘
-```
+<p align="center">
+  <img src="pictures/architecture.svg" alt="Zest Architecture">
+</p>
 
 ### Data Flow
 
@@ -81,11 +44,13 @@ Most terminal emulators render text on the CPU and push pixels to the GPU as a f
 ## Features
 
 ### Rendering
+
 - **OpenGL ES 3.2** single-pass shader pipeline (vertex + fragment shader)
 - **2048×2048 dynamic glyph texture atlas** with row-packing allocator
 - **FreeType2** font rasterization with LCD subpixel filtering
 
 ### Terminal Emulation
+
 - Full **ANSI/CSI/OSC escape sequence parser** with state machine
 - **256-color palette** (16 ANSI + 6×6×6 color cube + 24 grayscale levels)
 - **24-bit true color** (`ESC[38;2;R;G;Bm`)
@@ -99,6 +64,7 @@ Most terminal emulators render text on the CPU and push pixels to the GPU as a f
 - **UTF-8 multi-byte character decoding**
 
 ### Layout
+
 - **Pane splitting** (horizontal and vertical) via binary tree
 - **Pane navigation** (up/down/left/right) via distance-based heuristic
 - **Pane closing** with automatic focus transfer
@@ -106,17 +72,33 @@ Most terminal emulators render text on the CPU and push pixels to the GPU as a f
 - **Split line borders** rendered via OpenGL scissor test
 
 ### Tabs
+
 - **Multiple tabs** with horizontally scrollable tab bar
 - **Tab titles** auto-updated from pane CWD (via `/proc/<pid>/cwd`)
 - **Gradient right section** blending tab area into terminal background
 - **Live clock** (HH:MM) in the tab bar
 - **Keyboard shortcuts**: `Ctrl+Tab` / `Ctrl+Shift+Tab` / `Ctrl+PageUp` / `Ctrl+PageDown`
 
+### Built-in Utilities
+
+- **File Explorer**: Built-in visual file browser with search and navigation capabilities.
+<p align="center">
+  <img src="pictures/file-explorer.png" alt="Built-in File Explorer">
+</p>
+
+- **Command History**: Visual interface to browse, filter, and run past shell commands.
+<p align="center">
+  <img src="pictures/command-history.png" alt="Command History View">
+</p>
+
+
 ### Theming
+
 - **"Black Metal Immortal"** Base16 theme — pure black background with grey/teal/steel blue palette
 - **GTK4 CSS** for tab bar styling (dark theme with accent color underline on active tab)
 
 ### Input
+
 - **GTK4 event controllers**: key, motion, click gesture, scroll
 - **GTK IM context** for Unicode text input (IME support)
 - **Native Wayland/X11** with automatic fractional scaling (no blurry rendering)
@@ -126,30 +108,33 @@ Most terminal emulators render text on the CPU and push pixels to the GPU as a f
 ## Keybindings
 
 ### Tab Management
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Tab` | Next tab |
-| `Ctrl+Shift+Tab` | Previous tab |
-| `Ctrl+PageDown` | Next tab |
-| `Ctrl+PageUp` | Previous tab |
-| `Ctrl+Shift+T` | New tab |
-| `Ctrl+Shift+W` | Close active tab |
+
+| Shortcut         | Action           |
+| ---------------- | ---------------- |
+| `Ctrl+Tab`       | Next tab         |
+| `Ctrl+Shift+Tab` | Previous tab     |
+| `Ctrl+PageDown`  | Next tab         |
+| `Ctrl+PageUp`    | Previous tab     |
+| `Ctrl+Shift+T`   | New tab          |
+| `Ctrl+Shift+W`   | Close active tab |
 
 ### Pane Management
-| Shortcut | Action |
-|---|---|
+
+| Shortcut       | Action                  |
+| -------------- | ----------------------- |
 | `Ctrl+Shift+H` | Split pane horizontally |
-| `Ctrl+Shift+J` | Split pane vertically |
-| `Ctrl+Shift+X` | Close focused pane |
-| `Ctrl+Shift+←` | Focus pane to the left |
-| `Ctrl+Shift+↑` | Focus pane above |
+| `Ctrl+Shift+J` | Split pane vertically   |
+| `Ctrl+Shift+X` | Close focused pane      |
+| `Ctrl+Shift+←` | Focus pane to the left  |
+| `Ctrl+Shift+↑` | Focus pane above        |
 | `Ctrl+Shift+→` | Focus pane to the right |
-| `Ctrl+Shift+↓` | Focus pane below |
+| `Ctrl+Shift+↓` | Focus pane below        |
 
 ### Clipboard
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Shift+C` | Copy selected text |
+
+| Shortcut       | Action               |
+| -------------- | -------------------- |
+| `Ctrl+Shift+C` | Copy selected text   |
 | `Ctrl+Shift+V` | Paste from clipboard |
 
 ---
@@ -204,6 +189,7 @@ Zig 0.17.0-dev's `@cImport` cannot handle GTK4's complex macro-heavy headers. Ze
 ### Glyph Atlas Strategy
 
 The 2048×2048 texture atlas uses a simple row-packing allocator:
+
 - **Grayscale glyphs** (monospace font): 1-channel, LCD subpixel filtered
 - **Color emoji glyphs** (Noto Color Emoji, etc.): 4-channel BGRA, scaled to fit cell slot
 - **Block characters** (U+2580–U+259F): procedurally generated, no FreeType needed
@@ -220,31 +206,34 @@ Instead of copying cell data on scroll, Grid.zig maintains a `row_indices` array
 
 ### Prerequisites
 
-| Dependency | Purpose |
-|---|---|
-| [Zig](https://ziglang.org/) 0.17.0-dev | Compiler |
-| GTK4 | Windowing, input, GLArea |
-| FreeType2 | Font rasterization |
-| libepoxy | OpenGL function dispatch |
-| Pango / Cairo | GTK4 text layout (indirect) |
-| Fontconfig | System font discovery |
-| HarfBuzz | Text shaping (indirect via Pango) |
+| Dependency                             | Purpose                           |
+| -------------------------------------- | --------------------------------- |
+| [Zig](https://ziglang.org/) 0.17.0-dev | Compiler                          |
+| GTK4                                   | Windowing, input, GLArea          |
+| FreeType2                              | Font rasterization                |
+| libepoxy                               | OpenGL function dispatch          |
+| Pango / Cairo                          | GTK4 text layout (indirect)       |
+| Fontconfig                             | System font discovery             |
+| HarfBuzz                               | Text shaping (indirect via Pango) |
 
 **Debian/Ubuntu:**
+
 ```bash
 sudo apt install zig gtk-4-dev libfreetype-dev libepoxy-dev \
-  libpango1.0-dev libcairo2-dev libfontconfig1-dev libharfbuzz-dev
+  libpango1.0-dev libcairo2-dev libfontconfig1-dev libharfbuzz-dev pkg-config
 ```
 
 **Fedora:**
+
 ```bash
 sudo dnf install zig gtk4-devel freetype-devel libepoxy-devel \
-  pango-devel cairo-devel fontconfig-devel harfbuzz-devel
+  pango-devel cairo-devel fontconfig-devel harfbuzz-devel pkgconf
 ```
 
 **Arch Linux:**
+
 ```bash
-sudo pacman -S zig gtk4 freetype2 libepoxy pango cairo fontconfig harfbuzz
+sudo pacman -S zig gtk4 freetype2 libepoxy pango cairo fontconfig harfbuzz pkgconf
 ```
 
 ### Build
@@ -261,6 +250,14 @@ zig build -Doptimize=ReleaseSafe
 ./zig-out/bin/zest
 ```
 
+### Install (Optional)
+
+To install Zest to your local user directory:
+
+```bash
+zig build install --prefix ~/.local
+```
+
 ### Debug Build
 
 ```bash
@@ -274,17 +271,17 @@ zig build -Doptimize=Debug
 
 Zest currently has **no user-facing configuration files**. All settings are hardcoded in the source:
 
-| Setting | Value | Location |
-|---|---|---|
-| Font | DejaVu Sans Mono → Liberation Mono → Ubuntu Mono | `main.zig` |
-| Font size | 32px | `main.zig` |
-| Initial grid | 120 cols × 35 rows | `main.zig` |
-| Window size | 1280×720 | `main.zig` |
-| Shell | `$SHELL` or `/bin/sh` | `Pty.zig` |
-| TERM | `xterm-256color` | `Pty.zig` |
-| Atlas size | 2048×2048 | `Atlas.zig` |
-| PTY read buffer | 65536 bytes | `main.zig` |
-| Theme | Black Metal Immortal (Base16) | `Cell.zig` |
+| Setting         | Value                                            | Location    |
+| --------------- | ------------------------------------------------ | ----------- |
+| Font            | DejaVu Sans Mono → Liberation Mono → Ubuntu Mono | `main.zig`  |
+| Font size       | 32px                                             | `main.zig`  |
+| Initial grid    | 120 cols × 35 rows                               | `main.zig`  |
+| Window size     | 1280×720                                         | `main.zig`  |
+| Shell           | `$SHELL` or `/bin/sh`                            | `Pty.zig`   |
+| TERM            | `xterm-256color`                                 | `Pty.zig`   |
+| Atlas size      | 2048×2048                                        | `Atlas.zig` |
+| PTY read buffer | 65536 bytes                                      | `main.zig`  |
+| Theme           | Black Metal Immortal (Base16)                    | `Cell.zig`  |
 
 Configuration file support is planned for a future release.
 
@@ -292,20 +289,21 @@ Configuration file support is planned for a future release.
 
 ## Platform Support
 
-| Platform | Status | Backend |
-|---|---|---|
-| Linux (Wayland) | ✅ Supported | GTK4 + EGL + GLES 3.2 |
-| Linux (X11) | ✅ Supported | GTK4 + GLX |
-| macOS | ⚠️ Partial | GLFW (legacy, GTK4 migration pending) |
-| Windows | ⚠️ Partial | ConPty backend exists, process spawning incomplete |
+| Platform        | Status       | Backend                                            |
+| --------------- | ------------ | -------------------------------------------------- |
+| Linux (Wayland) | ✅ Supported | GTK4 + EGL + GLES 3.2                              |
+| Linux (X11)     | ✅ Supported | GTK4 + GLX                                         |
+| macOS           | ⚠️ Partial   | GLFW (legacy, GTK4 migration pending)              |
+| Windows         | ⚠️ Partial   | ConPty backend exists, process spawning incomplete |
 
 ---
 
 ## Roadmap
 
 - [ ] User configuration file (JSON/TOML)
-- [ ] Font size adjustment (`Ctrl++` / `Ctrl+-`)
-- [ ] Search functionality (`Ctrl+Shift+F`)
+- [X] Font size adjustment (`Ctrl++` / `Ctrl+-`)
+- [ ] Workspaces
+- [ ] Tab-splitting
 - [ ] Link detection and clickable URLs
 - [ ] Bell notification (visual + audio)
 - [ ] Full macOS GTK4 support
@@ -317,24 +315,10 @@ Configuration file support is planned for a future release.
 
 ---
 
-## Contributing
-
-Contributions are welcome! Areas that need help:
-
-- **macOS GTK4 migration** — migrate from GLFW to GTK4
-- **Windows ConPty** — complete process spawning
-- **Configuration system** — design and implement user config
-- **Testing** — terminal escape sequence conformance tests
-- **Documentation** — improve docs, add screenshots
-
-Please open an issue before starting work on larger features.
-
----
-
 ## License
 
 This project does not yet have a license file. A permissive license (MIT or Apache 2.0) will be added soon.
 
 ---
 
-Built with ⚡ by [Jayanth](https://github.com/Jayanth1312)
+Built with by [Jayanth](https://github.com/Jayanth1312)

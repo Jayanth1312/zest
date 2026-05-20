@@ -134,6 +134,12 @@ pub const Renderer = struct {
         };
     }
 
+    pub fn reloadFont(self: *Renderer) !void {
+        try self.atlas.reset();
+        const space_glyph = try self.atlas.loadGlyph(self.font, self.fallback_font, ' ');
+        try self.font.glyphs.put(' ', space_glyph);
+    }
+
     pub fn deinit(self: *Renderer) void {
         c.glDeleteProgram(self.shader_program);
         c.glDeleteVertexArrays(1, &self.vao);
@@ -255,7 +261,14 @@ pub const Renderer = struct {
 
                 const char_idx = if (cell.char == 0) @as(u21, ' ') else cell.char;
                 const glyph = self.font.glyphs.get(char_idx) orelse blk: {
-                    const new_glyph = self.atlas.loadGlyph(self.font, self.fallback_font, char_idx) catch self.font.glyphs.get(' ').?;
+                    const new_glyph = self.atlas.loadGlyph(self.font, self.fallback_font, char_idx) catch blk2: {
+                        if (self.font.glyphs.get(' ')) |space_glyph| break :blk2 space_glyph;
+                        break :blk2 Font.GlyphInfo{
+                            .width = self.font.cell_width,
+                            .height = self.font.cell_height,
+                            .has_glyph = true,
+                        };
+                    };
                     self.font.glyphs.put(char_idx, new_glyph) catch {};
                     break :blk new_glyph;
                 };

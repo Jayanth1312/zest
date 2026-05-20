@@ -6,7 +6,7 @@ const c = bindings.c;
 const ft_c = bindings.ft;
 const Font = @import("Font.zig");
 
-const MAX_CELL_BUF = 4096 * 4;
+const MAX_CELL_BUF = 16384 * 4;
 
 pub const Atlas = struct {
     texture_id: c.GLuint,
@@ -384,6 +384,36 @@ pub const Atlas = struct {
 
         self.cursor_x += width;
         return glyph_info;
+    }
+
+    pub fn reset(self: *Atlas) !void {
+        c.glDeleteTextures(1, &self.texture_id);
+
+        var texture_id: c.GLuint = 0;
+        c.glGenTextures(1, &texture_id);
+        c.glBindTexture(c.GL_TEXTURE_2D, texture_id);
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+
+        c.glTexImage2D(
+            c.GL_TEXTURE_2D,
+            0,
+            c.GL_RGBA,
+            @intCast(self.width),
+            @intCast(self.height),
+            0,
+            c.GL_RGBA,
+            c.GL_UNSIGNED_BYTE,
+            null,
+        );
+
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_CLAMP_TO_EDGE);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_CLAMP_TO_EDGE);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_NEAREST);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_NEAREST);
+
+        self.texture_id = texture_id;
+        self.cursor_x = 0;
+        self.cursor_y = 0;
     }
 
     pub fn deinit(self: *Atlas) void {

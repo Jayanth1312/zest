@@ -12,7 +12,7 @@ pub const Grid = struct {
     pub fn init(allocator: std.mem.Allocator, cols: u32, rows: u32) !Grid {
         const total = @as(usize, cols) * @as(usize, rows);
         const cells = try allocator.alloc(Cell.Cell, total);
-        @memset(cells, Cell.Cell.blank);
+        @memset(cells, Cell.Cell{ .bg = Cell.Color.default_bg });
 
         const row_indices = try allocator.alloc(u32, rows);
         for (row_indices, 0..) |*ptr, i| {
@@ -104,17 +104,5 @@ pub const Grid = struct {
             const start = @as(usize, phys_row) * self.cols;
             @memset(self.cells[start .. start + self.cols], fill_cell);
         }
-    }
-    
-    pub fn getLastUsedRow(self: *const Grid) u32 {
-        var r: u32 = self.rows - 1;
-        while (r > 0) : (r -= 1) {
-            var c: u32 = 0;
-            while (c < self.cols) : (c += 1) {
-                const char = self.cellAt(c, r).char;
-                if (char != 0 and char != ' ') return r;
-            }
-        }
-        return 0;
     }
 };

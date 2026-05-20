@@ -61,6 +61,22 @@ pub const Font = struct {
         };
 }
 
+pub fn setPixelSize(self: *Font, pixel_size: u32) !void {
+    if (ft.FT_Set_Pixel_Sizes(self.ft_face, 0, pixel_size) != 0) {
+        return error.FontSetSizeFailed;
+    }
+
+    _ = ft.FT_Load_Char(self.ft_face, 'M', ft.FT_LOAD_RENDER | ft.FT_LOAD_TARGET_LCD);
+    const metrics = self.ft_face.*.size.*.metrics;
+
+    self.ascender = @intCast(@divTrunc(metrics.ascender + 63, 64));
+    const descender: i32 = @intCast(@divTrunc(metrics.descender - 63, 64));
+    self.cell_height = @intCast(self.ascender - descender);
+    self.cell_width = @intCast(self.ft_face.*.glyph.*.advance.x >> 6);
+
+    self.glyphs.clearRetainingCapacity();
+}
+
 pub fn deinit(self: *Font) void {
     self.glyphs.deinit();
     _ = ft.FT_Done_Face(self.ft_face);
